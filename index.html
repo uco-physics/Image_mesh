@@ -95,7 +95,7 @@
                 img.onload = () => {
                     canvas.width = img.width;
                     canvas.height = img.height;
-                    ctx.imageSmoothingEnabled = true; // スムーズな補間
+                    ctx.imageSmoothingEnabled = true;
                     updateCanvasOffset();
                     initGrid();
                     saveHistory();
@@ -320,10 +320,11 @@
             }
         }
 
-        // パースペクティブワープ（新実装）
+        // パースペクティブワープ（修正版）
         function warpPerspective(p1, p2, p3, p4, srcX, srcY, srcW, srcH) {
             try {
                 // クリッピングパスでメッシュ領域を定義
+                ctx.save();
                 ctx.beginPath();
                 ctx.moveTo(p1.x, p1.y);
                 ctx.lineTo(p2.x, p2.y);
@@ -332,17 +333,26 @@
                 ctx.closePath();
                 ctx.clip();
 
-                // 簡略パースペクティブ変換（アフィン近似）
-                const dx1 = p2.x - p1.x, dy1 = p2.y - p1.y;
-                const dx2 = p3.x - p1.x, dy2 = p3.y - p1.y;
-                const dx3 = p4.x - p2.x - p3.x + p1.x;
-                const dy3 = p4.y - p2.y - p3.y + p1.y;
+                // 元画像の4点（矩形）
+                const srcPoints = [
+                    { x: srcX, y: srcY },           // 左上
+                    { x: srcX + srcW, y: srcY },    // 右上
+                    { x: srcX, y: srcY + srcH },    // 左下
+                    { x: srcX + srcW, y: srcY + srcH } // 右下
+                ];
 
-                // 変換行列を適用
-                ctx.save();
-                ctx.transform(
-                    dx1 / srcW, dy1 / srcW,
-                    dx2 / srcH, dy2 / srcH,
+                // 変換先の4点
+                const dstPoints = [
+                    { x: p1.x, y: p1.y },
+                    { x: p2.x, y: p2.y },
+                    { x: p3.x, y: p3.y },
+                    { x: p4.x, y: p4.y }
+                ];
+
+                // 簡略パースペクティブ変換（アフィン近似）
+                ctx.setTransform(
+                    (p2.x - p1.x) / srcW, (p2.y - p1.y) / srcW,
+                    (p3.x - p1.x) / srcH, (p3.y - p1.y) / srcH,
                     p1.x, p1.y
                 );
 
