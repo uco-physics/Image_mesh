@@ -3,88 +3,63 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>Mesh Warp – コミットツリー版</title>
-
-  <!-- Tailwind CSS CDN -->
-  <script src="https://cdn.tailwindcss.com"></script>
-  <script>
-    tailwind.config = {
-      theme: {
-        extend: {
-          colors: {
-            primary: '#4F46E5',
-            secondary: '#10B981'
-          }
-        }
-      }
+  <title>メッシュワープ＋ペン描画（修正版）最善？</title>
+  <style>
+    body { font-family: Arial, sans-serif; text-align: center; margin: 20px; }
+    #container { position: relative; display: inline-block; }
+    canvas { border: 3px solid #000; background: #f0f0f0; cursor: crosshair; }
+    #gridContainer {
+      position: absolute; top: 0; left: 0;
+      width: 100%; height: 100%;
+      pointer-events: none;
     }
-  </script>
-
-  <!-- Google Fonts: Inter -->
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
-  <!-- Font Awesome (Kit ID を your-kit-id に置き換え) -->
-  <script src="https://kit.fontawesome.com/your-kit-id.js" crossorigin="anonymous"></script>
-
-  <!-- カスタムスタイル -->
-  <link rel="stylesheet" href="style.css">
+    .grid-point {
+      position: absolute; width: 10px; height: 10px;
+      background: rgba(255,0,0,0.8); border-radius:50%;
+      transform: translate(-50%,-50%); cursor: move;
+      pointer-events: auto;
+    }
+    .controls { margin: 20px 0; }
+    .controls > * { margin: 0 5px; vertical-align: middle; }
+    #error { color: red; margin-top: 10px; }
+  </style>
 </head>
+<body>
+  <h1>メッシュワープ＋ペン描画（修正版）</h1>
+  <div class="controls">
+    <input type="file" id="imageInput" accept="image/*">
+    <label>横分割:
+      <input type="range" id="gridX" min="2" max="50" value="5">
+      <span id="gridXValue">5</span>
+    </label>
+    <label>縦分割:
+      <input type="range" id="gridY" min="2" max="50" value="5">
+      <span id="gridYValue">5</span>
+    </label>
+    <button id="applyGridBtn">グリッド更新</button>
+    <button id="undoBtn">戻る</button>
+    <button id="redoBtn">進む</button>
+    <button id="resetBtn">リセット</button>
+    <button id="saveBtn">保存</button>
+    <select id="toolSelect">
+      <option value="edit">グリッド編集</option>
+      <option value="pen">ペン</option>
+      <option value="eraser">消しゴム</option>
+    </select>
+    <input type="color" id="colorPicker" value="#ff0000">
+    <label>太さ:
+      <input type="range" id="thickness" min="1" max="50" value="5">
+    </label>
+    <div id="error"></div>
+  </div>
 
-<body class="bg-gray-50 font-inter text-gray-800">
-  <header class="bg-white/80 backdrop-blur sticky top-0 z-10 p-4 shadow-sm">
-    <h1 class="text-2xl font-bold text-primary text-center">メッシュワープ（コミットツリー版）</h1>
-  </header>
+  <div id="container">
+    <canvas id="canvas"></canvas>
+    <div id="gridContainer"></div>
+  </div>
 
-  <main class="py-6 px-4 space-y-6 max-w-4xl mx-auto">
-    <!-- コントロールパネル -->
-    <section class="controls bg-white p-6 rounded-2xl shadow-lg grid gap-4 lg:grid-cols-2">
-      <div class="flex flex-col">
-        <label for="imageInput" class="font-semibold mb-1">画像ロード</label>
-        <input type="file" id="imageInput" accept="image/*" class="block">
-      </div>
-
-      <label class="flex flex-col">
-        <span class="font-semibold">横分割</span>
-        <input type="range" id="gridX" min="2" max="50" value="5" class="h-2 bg-gray-200 rounded-lg">
-        <span id="gridXValue" class="mt-1 text-right text-sm text-gray-600">5</span>
-      </label>
-
-      <label class="flex flex-col">
-        <span class="font-semibold">縦分割</span>
-        <input type="range" id="gridY" min="2" max="50" value="5" class="h-2 bg-gray-200 rounded-lg">
-        <span id="gridYValue" class="mt-1 text-right text-sm text-gray-600">5</span>
-      </label>
-
-      <div class="col-span-full flex flex-wrap gap-2 justify-center">
-        <button id="applyGridBtn" class="btn-primary">
-          <i class="fas fa-grip-lines"></i> グリッド更新
-        </button>
-        <button id="undoBtn" class="btn-outline">
-          <i class="fas fa-undo"></i> 戻る
-        </button>
-        <button id="redoBtn" class="btn-outline">
-          <i class="fas fa-redo"></i> 進む
-        </button>
-        <button id="resetBtn" class="btn-outline">
-          <i class="fas fa-sync-alt"></i> リセット
-        </button>
-        <button id="saveBtn" class="btn-primary">
-          <i class="fas fa-download"></i> 保存
-        </button>
-      </div>
-
-      <div id="error" class="col-span-full text-red-600 h-5"></div>
-    </section>
-
-    <!-- キャンバス＋グリッドポイント -->
-    <section class="relative inline-block">
-      <canvas id="canvas" class="border-4 border-gray-800 bg-white"></canvas>
-      <div id="gridContainer" class="absolute inset-0"></div>
-    </section>
-  </main>
-
-  <!-- オリジナルの JavaScript をここにペースト -->
   <script>
-    // --- コミットクラス ---
+    // --- Commit クラス ---
     class Commit {
       constructor(parent, imgData, gridX, gridY, initialPoints) {
         this.parent    = parent;
@@ -106,9 +81,9 @@
       }
     }
 
-    // --- グローバル ---
-    const canvas = document.getElementById('canvas');
-    const ctx    = canvas.getContext('2d');
+    // --- DOM Elements ---
+    const canvas       = document.getElementById('canvas');
+    const ctx          = canvas.getContext('2d');
     const imgInput     = document.getElementById('imageInput');
     const gridXInput   = document.getElementById('gridX');
     const gridYInput   = document.getElementById('gridY');
@@ -119,116 +94,204 @@
     const redoBtn      = document.getElementById('redoBtn');
     const resetBtn     = document.getElementById('resetBtn');
     const saveBtn      = document.getElementById('saveBtn');
+    const toolSelect   = document.getElementById('toolSelect');
+    const colorPicker  = document.getElementById('colorPicker');
+    const thicknessInp = document.getElementById('thickness');
     const gridContainer= document.getElementById('gridContainer');
     const errorDiv     = document.getElementById('error');
 
-    let img, imgData, gridPoints = [], pendingX = 5, pendingY = 5;
-    let rootCommit = null, currentCommit = null;
-    let isDragging = false, dragIdx = null;
+    // --- State ---
+    let img           = new Image();
+    let imgData       = null;
+    let gridPoints    = [];
+    let pendingX = +gridXInput.value, pendingY = +gridYInput.value;
+    let rootCommit    = null, currentCommit = null;
+    let isDragging    = false, dragIdx = null;
+    let tool          = 'edit';
+    let strokeColor   = colorPicker.value;
+    let strokeWidth   = +thicknessInp.value;
 
+    // オフスクリーン：ペン描画用
+    const strokeCanvas = document.createElement('canvas');
+    const strokeCtx    = strokeCanvas.getContext('2d');
+
+    // --- Helpers ---
     function showError(msg) {
       errorDiv.textContent = msg;
-      console.error(msg);
     }
+    function mix(a,b,t){ return a + (b-a)*t; }
     function sampleBilinear(buf, sx, sy) {
-      const w=canvas.width, h=canvas.height;
+      const w = canvas.width, h = canvas.height;
       sx = Math.max(0, Math.min(w-1, sx));
       sy = Math.max(0, Math.min(h-1, sy));
-      const x0 = Math.floor(sx), y0 = Math.floor(sy);
-      const x1 = Math.min(w-1, x0+1), y1 = Math.min(h-1, y0+1);
-      const dx = sx - x0, dy = sy - y0;
+      const x0 = Math.floor(sx), y0 = Math.floor(sy),
+            x1 = Math.min(w-1, x0+1), y1 = Math.min(h-1, y0+1),
+            dx = sx - x0, dy = sy - y0;
       const i00=(y0*w+x0)*4, i10=(y0*w+x1)*4,
             i01=(y1*w+x0)*4, i11=(y1*w+x1)*4;
-      const c00=[buf[i00],buf[i00+1],buf[i00+2],buf[i00+3]];
-      const c10=[buf[i10],buf[i10+1],buf[i10+2],buf[i10+3]];
-      const c01=[buf[i01],buf[i01+1],buf[i01+2],buf[i01+3]];
-      const c11=[buf[i11],buf[i11+1],buf[i11+2],buf[i11+3]];
-      const mix=(a,b,t)=>a+(b-a)*t;
-      const r = mix(mix(c00[0],c10[0],dx), mix(c01[0],c11[0],dx), dy);
-      const g = mix(mix(c00[1],c10[1],dx), mix(c01[1],c11[1],dx), dy);
-      const b = mix(mix(c00[2],c10[2],dx), mix(c01[2],c11[2],dx), dy);
-      const a = mix(mix(c00[3],c10[3],dx), mix(c01[3],c11[3],dx), dy);
-      return [r,g,b,a];
+      const c00=[buf[i00],buf[i00+1],buf[i00+2],buf[i00+3]],
+            c10=[buf[i10],buf[i10+1],buf[i10+2],buf[i10+3]],
+            c01=[buf[i01],buf[i01+1],buf[i01+2],buf[i01+3]],
+            c11=[buf[i11],buf[i11+1],buf[i11+2],buf[i11+3]];
+      return [
+        mix(mix(c00[0],c10[0],dx), mix(c01[0],c11[0],dx), dy),
+        mix(mix(c00[1],c10[1],dx), mix(c01[1],c11[1],dx), dy),
+        mix(mix(c00[2],c10[2],dx), mix(c01[2],c11[2],dx), dy),
+        mix(mix(c00[3],c10[3],dx), mix(c01[3],c11[3],dx), dy),
+      ];
     }
-    function drawTriangle(v0,v1,v2,o0,o1,o2, buf, w,h){
-      const minX = Math.max(0,Math.floor(Math.min(v0.x,v1.x,v2.x)));
-      const maxX = Math.min(w-1,Math.ceil (Math.max(v0.x,v1.x,v2.x)));
-      const minY = Math.max(0,Math.floor(Math.min(v0.y,v1.y,v2.y)));
-      const maxY = Math.min(h-1,Math.ceil (Math.max(v0.y,v1.y,v2.y)));
-      const area = (v1.y-v2.y)*(v0.x-v2.x) + (v2.x-v1.x)*(v0.y-v2.y);
-      for(let y=minY; y<=maxY; y++){
-        for(let x=minX; x<=maxX; x++){
-          const w0 = ((v1.y-v2.y)*(x-v2.x) + (v2.x-v1.x)*(y-v2.y)) / area;
-          const w1 = ((v2.y-v0.y)*(x-v2.x) + (v0.x-v2.x)*(y-v2.y)) / area;
-          const w2 = 1 - w0 - w1;
+    function barycentric(v0,v1,v2,x,y){
+      const area = (v1.y-v2.y)*(v0.x-v2.x)+(v2.x-v1.x)*(v0.y-v2.y);
+      const w0 = ((v1.y-v2.y)*(x-v2.x)+(v2.x-v1.x)*(y-v2.y))/area;
+      const w1 = ((v2.y-v0.y)*(x-v2.x)+(v0.x-v2.x)*(y-v2.y))/area;
+      const w2 = 1 - w0 - w1;
+      return (w0>=0&&w1>=0&&w2>=0) ? {w0,w1,w2} : null;
+    }
+    function destToOrig(px,py){
+      const w=canvas.width, h=canvas.height;
+      const gx = Math.min(currentCommit.gridX-1,
+                          Math.floor(px/(w/currentCommit.gridX)));
+      const gy = Math.min(currentCommit.gridY-1,
+                          Math.floor(py/(h/currentCommit.gridY)));
+      const i = gy*(currentCommit.gridX+1)+gx;
+      const p1=gridPoints[i], p2=gridPoints[i+1],
+            p3=gridPoints[i+currentCommit.gridX+1],
+            p4=gridPoints[i+currentCommit.gridX+2];
+      const o1={x:p1.origX,y:p1.origY},
+            o2={x:p2.origX,y:p2.origY},
+            o3={x:p3.origX,y:p3.origY},
+            o4={x:p4.origX,y:p4.origY};
+      let bc = barycentric(p1,p2,p3, px,py);
+      if(bc) return {x: bc.w0*o1.x+bc.w1*o2.x+bc.w2*o3.x,
+                     y: bc.w0*o1.y+bc.w1*o2.y+bc.w2*o3.y};
+      bc = barycentric(p4,p3,p2, px,py);
+      if(bc) return {x: bc.w0*o4.x+bc.w1*o3.x+bc.w2*o2.x,
+                     y: bc.w0*o4.y+bc.w1*o3.y+bc.w2*o2.y};
+      return {x:px,y:py};
+    }
+    function drawTriangle(v0,v1,v2,o0,o1,o2, baseBuf, strokeBuf, outBuf, w,h){
+      const minX = Math.max(0, Math.floor(Math.min(v0.x,v1.x,v2.x))),
+            maxX = Math.min(w-1, Math.ceil (Math.max(v0.x,v1.x,v2.x))),
+            minY = Math.max(0, Math.floor(Math.min(v0.y,v1.y,v2.y))),
+            maxY = Math.min(h-1, Math.ceil (Math.max(v0.y,v1.y,v2.y))),
+            area = (v1.y-v2.y)*(v0.x-v2.x)+(v2.x-v1.x)*(v0.y-v2.y);
+      for(let y=minY;y<=maxY;y++){
+        for(let x=minX;x<=maxX;x++){
+          const w0 = ((v1.y-v2.y)*(x-v2.x)+(v2.x-v1.x)*(y-v2.y))/area,
+                w1 = ((v2.y-v0.y)*(x-v2.x)+(v0.x-v2.x)*(y-v2.y))/area,
+                w2 = 1 - w0 - w1;
           if(w0>=0 && w1>=0 && w2>=0){
-            const sx = w0*o0.x + w1*o1.x + w2*o2.x;
-            const sy = w0*o0.y + w1*o1.y + w2*o2.y;
-            const [r,g,b,a] = sampleBilinear(imgData.data, sx, sy);
-            const idx = (y*w + x)*4;
-            buf[idx]=r; buf[idx+1]=g; buf[idx+2]=b; buf[idx+3]=a;
+            const sx = w0*o0.x + w1*o1.x + w2*o2.x,
+                  sy = w0*o0.y + w1*o1.y + w2*o2.y,
+                  [r,g,b,a] = sampleBilinear(baseBuf,sx,sy),
+                  [sr,sg,sb,sa] = sampleBilinear(strokeBuf,sx,sy),
+                  alpha = sa/255,
+                  idx = (y*w+x)*4;
+            outBuf[idx  ] = sr*alpha + r*(1-alpha);
+            outBuf[idx+1] = sg*alpha + g*(1-alpha);
+            outBuf[idx+2] = sb*alpha + b*(1-alpha);
+            outBuf[idx+3] = 255;
           }
         }
       }
     }
 
-    function draw() {
-      if (!imgData) return;
+    // --- 描画本体 ---
+    function draw(){
+      if(!imgData) return;
       const w=canvas.width, h=canvas.height;
       const output = ctx.createImageData(w,h);
-      const buf = output.data;
-      for(let gy=0; gy<currentCommit.gridY; gy++){
-        for(let gx=0; gx<currentCommit.gridX; gx++){
-          const i = gy*(currentCommit.gridX+1) + gx;
-          const p1=gridPoints[i], p2=gridPoints[i+1],
+      const outBuf    = output.data;
+      const baseBuf   = imgData.data;
+      const strokeBuf = strokeCtx.getImageData(0,0,w,h).data;
+      for(let gy=0;gy<currentCommit.gridY;gy++){
+        for(let gx=0;gx<currentCommit.gridX;gx++){
+          const i = gy*(currentCommit.gridX+1)+gx;
+          const p1=gridPoints[i],   p2=gridPoints[i+1],
                 p3=gridPoints[i+currentCommit.gridX+1],
                 p4=gridPoints[i+currentCommit.gridX+2];
-          const o1={x:p1.origX,y:p1.origY},o2={x:p2.origX,y:p2.origY},
-                o3={x:p3.origX,y:p3.origY},o4={x:p4.origX,y:p4.origY};
-          drawTriangle(p1,p2,p3,o1,o2,o3,buf,w,h);
-          drawTriangle(p4,p3,p2,o4,o3,o2,buf,w,h);
+          const o1={x:p1.origX,y:p1.origY},
+                o2={x:p2.origX,y:p2.origY},
+                o3={x:p3.origX,y:p3.origY},
+                o4={x:p4.origX,y:p4.origY};
+          drawTriangle(p1,p2,p3, o1,o2,o3, baseBuf, strokeBuf, outBuf, w,h);
+          drawTriangle(p4,p3,p2, o4,o3,o2, baseBuf, strokeBuf, outBuf, w,h);
         }
       }
       ctx.putImageData(output,0,0);
     }
 
+    // --- グリッド DOM 管理 ---
     function createPoint(x,y,i){
       const d = document.createElement('div');
       d.className = 'grid-point';
       d.style.left = x+'px';
       d.style.top  = y+'px';
-      d.onmousedown = ()=>{ isDragging=true; dragIdx=i; };
+      d.onmousedown = () => {
+        if(tool==='edit'){
+          isDragging = true;
+          dragIdx = i;
+        }
+      };
       gridContainer.appendChild(d);
     }
-    function initGridCommit(c){
-      ctx.putImageData(c.imgData,0,0);
-      imgData = c.imgData;
-      gridXInput.value = c.gridX;
-      gridYInput.value = c.gridY;
-      gridXValueEl.textContent = c.gridX;
-      gridYValueEl.textContent = c.gridY;
-      pendingX = c.gridX;
-      pendingY = c.gridY;
-      gridPoints = c.currentPoints();
+
+    function initGridCommit(commit){
+      // ← ここでストロークをクリア！
+      strokeCtx.clearRect(0, 0, strokeCanvas.width, strokeCanvas.height);
+
+      // ベース画像描画
+      ctx.putImageData(commit.imgData,0,0);
+      imgData = commit.imgData;
+
+      // スライダー反映
+      gridXInput.value = commit.gridX;
+      gridYInput.value = commit.gridY;
+      gridXValueEl.textContent = commit.gridX;
+      gridYValueEl.textContent = commit.gridY;
+      pendingX = commit.gridX;
+      pendingY = commit.gridY;
+
+      // gridPoints ＆ DOM 再構築
+      gridPoints = commit.currentPoints();
       gridContainer.innerHTML = '';
       gridPoints.forEach((p,i)=> createPoint(p.x,p.y,i));
+
+      // 再描画
+      draw();
     }
 
-    imgInput.addEventListener('change',e=>{
-      const file=e.target.files[0];
+    // --- イベント登録 ---
+    gridXInput.addEventListener('input', ()=>{
+      pendingX = +gridXInput.value;
+      gridXValueEl.textContent = pendingX;
+    });
+    gridYInput.addEventListener('input', ()=>{
+      pendingY = +gridYInput.value;
+      gridYValueEl.textContent = pendingY;
+    });
+
+    imgInput.addEventListener('change', e=>{
+      const file = e.target.files[0];
       if(!file) return showError('画像を選択してください');
-      img = new Image();
       img.src = URL.createObjectURL(file);
       img.onload = ()=>{
-        canvas.width = img.width;
-        canvas.height= img.height;
+        canvas.width  = img.width;
+        canvas.height = img.height;
+        strokeCanvas.width  = img.width;
+        strokeCanvas.height = img.height;
+        strokeCtx.clearRect(0,0,img.width,img.height);
+
+        // 初期ベース
         ctx.drawImage(img,0,0);
         const base = ctx.getImageData(0,0,canvas.width,canvas.height);
-        const initPoints=[];
-        const gx=+gridXInput.value, gy=+gridYInput.value;
+
+        // 初期グリッドポイント
+        const gx = +gridXInput.value, gy = +gridYInput.value;
+        const initPts = [];
         for(let y=0;y<=gy;y++){
           for(let x=0;x<=gx;x++){
-            initPoints.push({
+            initPts.push({
               x: x*(canvas.width/gx),
               y: y*(canvas.height/gy),
               origX:x*(canvas.width/gx),
@@ -236,19 +299,19 @@
             });
           }
         }
-        rootCommit = new Commit(null,base,gx,gy,initPoints);
+        rootCommit    = new Commit(null, base, gx, gy, initPts);
         currentCommit = rootCommit;
         initGridCommit(rootCommit);
-        draw();
-        errorDiv.textContent = '';
       };
       img.onerror = ()=> showError('画像読み込み失敗');
     });
 
-    applyGridBtn.addEventListener('click',()=>{
+    applyGridBtn.addEventListener('click', ()=>{
+      if(!currentCommit) return;
+      // 合成画像を新ベースに
       const newBase = ctx.getImageData(0,0,canvas.width,canvas.height);
-      const nx=pendingX, ny=pendingY;
-      const pts=[];
+      const nx = pendingX, ny = pendingY;
+      const pts = [];
       for(let y=0;y<=ny;y++){
         for(let x=0;x<=nx;x++){
           pts.push({
@@ -259,68 +322,93 @@
           });
         }
       }
-      const c=new Commit(currentCommit,newBase,nx,ny,pts);
+      const c = new Commit(currentCommit,newBase,nx,ny,pts);
       currentCommit.children.push(c);
-      currentCommit=c;
+      currentCommit = c;
+      strokeCtx.clearRect(0,0,canvas.width,canvas.height);
       initGridCommit(c);
-      draw();
     });
 
-    undoBtn.addEventListener('click',()=>{
+    undoBtn.addEventListener('click', ()=>{
       if(!currentCommit) return;
-      if(currentCommit.idx>0) currentCommit.idx--;
-      else if(currentCommit.parent) currentCommit=currentCommit.parent;
+      if(currentCommit.idx>0){
+        currentCommit.idx--;
+      } else if(currentCommit.parent){
+        currentCommit = currentCommit.parent;
+      }
       initGridCommit(currentCommit);
-      draw();
     });
 
-    redoBtn.addEventListener('click',()=>{
+    redoBtn.addEventListener('click', ()=>{
       if(!currentCommit) return;
-      if(currentCommit.idx<currentCommit.snapshots.length-1) currentCommit.idx++;
-      else if(currentCommit.children.length===1) currentCommit=currentCommit.children[0];
+      if(currentCommit.idx<currentCommit.snapshots.length-1){
+        currentCommit.idx++;
+      } else if(currentCommit.children.length===1){
+        currentCommit = currentCommit.children[0];
+      }
       initGridCommit(currentCommit);
-      draw();
     });
 
-    resetBtn.addEventListener('click',()=>{
-      currentCommit.idx=0;
+    resetBtn.addEventListener('click', ()=>{
+      if(!currentCommit) return;
+      currentCommit.idx = 0;
       initGridCommit(currentCommit);
-      draw();
     });
 
-    saveBtn.addEventListener('click',()=>{
-      const a=document.createElement('a');
-      a.href=canvas.toDataURL();
-      a.download='warped.png';
+    saveBtn.addEventListener('click', ()=>{
+      const a = document.createElement('a');
+      a.href = canvas.toDataURL();
+      a.download = 'warped.png';
       a.click();
     });
 
-    document.addEventListener('mousemove',e=>{
-      if(!isDragging) return;
-      const rect=canvas.getBoundingClientRect();
-      const x=e.clientX-rect.left, y=e.clientY-rect.top;
-      const p=gridPoints[dragIdx];
-      p.x=Math.max(0,Math.min(canvas.width,x));
-      p.y=Math.max(0,Math.min(canvas.height,y));
-      const d=gridContainer.children[dragIdx];
-      d.style.left=p.x+'px';
-      d.style.top =p.y+'px';
-      currentCommit.push(gridPoints);
-      draw();
+    toolSelect.addEventListener('change', ()=>{
+      tool = toolSelect.value;
+      Array.from(gridContainer.children)
+        .forEach(pt=> pt.style.pointerEvents = (tool==='edit'?'auto':'none'));
+      canvas.style.cursor = (tool==='edit'?'default':'crosshair');
     });
+    colorPicker.addEventListener('input', ()=> strokeColor = colorPicker.value);
+    thicknessInp.addEventListener('input', ()=> strokeWidth = +thicknessInp.value);
 
-    document.addEventListener('mouseup',()=>{
-      isDragging=false;
-      dragIdx=null;
+    let drawing = false;
+    canvas.addEventListener('mousedown', e=>{
+      if(tool==='pen' || tool==='eraser'){
+        drawing = true;
+        strokeCtx.globalCompositeOperation = (tool==='eraser'?'destination-out':'source-over');
+        strokeCtx.strokeStyle = strokeColor;
+        strokeCtx.lineWidth   = (tool==='eraser'? strokeWidth*2 : strokeWidth);
+        const o = destToOrig(e.offsetX, e.offsetY);
+        strokeCtx.beginPath();
+        strokeCtx.moveTo(o.x, o.y);
+        draw();
+      }
     });
-
-    gridXInput.addEventListener('input',()=>{
-      pendingX=+gridXInput.value;
-      gridXValueEl.textContent=pendingX;
+    canvas.addEventListener('mousemove', e=>{
+      if(drawing){
+        const o = destToOrig(e.offsetX, e.offsetY);
+        strokeCtx.lineTo(o.x, o.y);
+        strokeCtx.stroke();
+        draw();
+      }
+      if(isDragging){
+        const rect = canvas.getBoundingClientRect();
+        const x = e.clientX - rect.left;
+        const y = e.clientY - rect.top;
+        const p = gridPoints[dragIdx];
+        p.x = Math.max(0,Math.min(canvas.width, x));
+        p.y = Math.max(0,Math.min(canvas.height,y));
+        const d = gridContainer.children[dragIdx];
+        d.style.left = p.x+'px';
+        d.style.top  = p.y+'px';
+        currentCommit.push(gridPoints);
+        draw();
+      }
     });
-    gridYInput.addEventListener('input',()=>{
-      pendingY=+gridYInput.value;
-      gridYValueEl.textContent=pendingY;
+    document.addEventListener('mouseup', ()=>{
+      drawing = false;
+      isDragging = false;
+      dragIdx = null;
     });
   </script>
 </body>
