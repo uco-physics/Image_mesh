@@ -312,7 +312,7 @@
                         const srcW = img.width / gridX;
                         const srcH = img.height / gridY;
 
-                        warpPerspective(p1, p2, p3, p4, srcX, srcY, srcW, srcH);
+                        warpContinuous(p1, p2, p3, p4, srcX, srcY, srcW, srcH);
                     }
                 }
             } catch (err) {
@@ -320,48 +320,36 @@
             }
         }
 
-        // パースペクティブワープ（修正版）
-        function warpPerspective(p1, p2, p3, p4, srcX, srcY, srcW, srcH) {
+        // 連続的なメッシュワープ（隙間対策強化）
+        function warpContinuous(p1, p2, p3, p4, srcX, srcY, srcW, srcH) {
             try {
-                // クリッピングパスでメッシュ領域を定義
-                ctx.save();
-                ctx.beginPath();
-                ctx.moveTo(p1.x, p1.y);
-                ctx.lineTo(p2.x, p2.y);
-                ctx.lineTo(p4.x, p4.y);
-                ctx.lineTo(p3.x, p3.y);
-                ctx.closePath();
-                ctx.clip();
+                const steps = 100; // 高密度サンプリングで隙間を埋める
+                const overlap = 1.05; // オーバーラップ強化
+                for (let u = 0; u <= 1; u += 1 / steps) {
+                    for (let v = 0; v <= 1; v += 1 / steps) {
+                        // バイリニア補間で滑らかな座標計算
+                        const px = (1 - u) * (1 - v) * p1.x + u * (1 - v) * p2.x +
+                                   (1 - u) * v * p3.x + u * v * p4.x;
+                        const py = (1 - u) * (1 - v) * p1.y + u * (1 - v) * p2.y +
+                                   (1 - u) * v * p3.y + u * v * p4.y;
 
-                // 元画像の4点（矩形）
-                const srcPoints = [
-                    { x: srcX, y: srcY },           // 左上
-                    { x: srcX + srcW, y: srcY },    // 右上
-                    { x: srcX, y: srcY + srcH },    // 左下
-                    { x: srcX + srcW, y: srcY + srcH } // 右下
-                ];
+                        const sx = srcX + u * srcW;
+                        const sy = srcY + v * srcH;
 
-                // 変換先の4点
-                const dstPoints = [
-                    { x: p1.x, y: p1.y },
-                    { x: p2.x, y: p2.y },
-                    { x: p3.x, y: p3.y },
-                    { x: p4.x, y: p4.y }
-                ];
-
-                // 簡略パースペクティブ変換（アフィン近似）
-                ctx.setTransform(
-                    (p2.x - p1.x) / srcW, (p2.y - p1.y) / srcW,
-                    (p3.x - p1.x) / srcH, (p3.y - p1.y) / srcH,
-                    p1.x, p1.y
-                );
-
-                // 画像を描画（オーバーラップで隙間防止）
-                ctx.drawImage(img, srcX, srcY, srcW * 1.02, srcH * 1.02, 0, 0, srcW * 1.02, srcH * 1.02);
-
-                ctx.restore();
+                        // 高密度描画とオーバーラップで隙間を埋める
+                        ctx.drawImage(
+                            img,
+                            sx, sy,
+                            srcW / steps * overlap,
+                            srcH / steps * overlap,
+                            px, py,
+                            canvas.width / gridX / steps * overlap,
+                            canvas.height / gridY / steps * overlap
+                        );
+                    }
+                }
             } catch (err) {
-                showError('パースペクティブワープ中にエラーが発生しました: ' + err.message);
+                showError('連続ワープ中にエラーが発生しました: ' + err.message);
             }
         }
 
