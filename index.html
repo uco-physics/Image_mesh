@@ -3,28 +3,50 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>メッシュワープ画像加工（逆写像＋境界埋め版）</title>
+    <title>メッシュワープ画像加工</title>
     <style>
-        body { font-family: Arial, sans-serif; text-align: center; margin: 20px; }
-        canvas { border: 3px solid #000; max-width: 100%; margin: 5px; background: #f0f0f0; }
-        .controls { margin: 20px 0; }
-        .grid-point { position: absolute; width: 8px; height: 8px; background: red;
-                      border-radius: 50%; transform: translate(-50%, -50%); cursor: move; }
-        button, input, select { margin: 5px; padding: 5px; }
-        #error { color: red; }
+        body {
+            font-family: Arial, sans-serif;
+            text-align: center;
+            margin: 20px;
+        }
+        canvas {
+            border: 3px solid #000;
+            max-width: 100%;
+            margin: 5px;
+            background: #f0f0f0;
+        }
+        .controls {
+            margin: 20px 0;
+        }
+        .grid-point {
+            position: absolute;
+            width: 8px;
+            height: 8px;
+            background: red;
+            border-radius: 50%;
+            transform: translate(-50%, -50%);
+            cursor: move;
+        }
+        button {
+            margin: 5px;
+        }
+        #error {
+            color: red;
+        }
     </style>
 </head>
 <body>
-    <h1>メッシュワープ画像加工（逆写像＋境界埋め版）</h1>
+    <h1>メッシュワープ画像加工</h1>
     <div class="controls">
         <input type="file" id="imageInput" accept="image/*">
         <div>
-            <label>横の分割数: <input type="range" id="gridX" min="2" max="50" value="5">
-                <span id="gridXValue">5</span></label>
+            <label>横の分割数: <input type="range" id="gridX" min="2" max="50" value="5"></label>
+            <span id="gridXValue">5</span>
         </div>
         <div>
-            <label>縦の分割数: <input type="range" id="gridY" min="2" max="50" value="5">
-                <span id="gridYValue">5</span></label>
+            <label>縦の分割数: <input type="range" id="gridY" min="2" max="50" value="5"></label>
+            <span id="gridYValue">5</span>
         </div>
         <button onclick="resetGrid()">グリッドリセット</button>
         <button onclick="undo()">戻る</button>
@@ -36,200 +58,344 @@
     <div id="gridContainer"></div>
 
     <script>
-    const canvas = document.getElementById('canvas');
-    const ctx = canvas.getContext('2d');
-    const imageInput = document.getElementById('imageInput');
-    const gridXInput = document.getElementById('gridX');
-    const gridYInput = document.getElementById('gridY');
-    const gridXValue = document.getElementById('gridXValue');
-    const gridYValue = document.getElementById('gridYValue');
-    const gridContainer = document.getElementById('gridContainer');
-    const errorDiv = document.getElementById('error');
+        const canvas = document.getElementById('canvas');
+        const ctx = canvas.getContext('2d');
+        const imageInput = document.getElementById('imageInput');
+        const gridXInput = document.getElementById('gridX');
+        const gridYInput = document.getElementById('gridY');
+        const gridXValue = document.getElementById('gridXValue');
+        const gridYValue = document.getElementById('gridYValue');
+        const gridContainer = document.getElementById('gridContainer');
+        const errorDiv = document.getElementById('error');
 
-    let img = new Image();
-    let imgData = null;
-    let gridPoints = [];
-    let gridX = 5, gridY = 5;
-    let isDragging = false, draggedPoint = null;
-    let canvasOffset = { x:0, y:0 };
-    let history = [], historyIndex = -1;
+        let img = new Image();
+        let gridPoints = [];
+        let gridX = 5, gridY = 5;
+        let isDragging = false;
+        let draggedPoint = null;
+        let canvasOffset = { x: 0, y: 0 };
+        let history = [];
+        let historyIndex = -1;
 
-    function showError(msg){ errorDiv.textContent = msg; console.error(msg); }
-
-    imageInput.addEventListener('change', e => {
-      const file = e.target.files[0];
-      if(!file){ showError('画像が選択されていません'); return; }
-      img.src = URL.createObjectURL(file);
-      img.onload = () => {
-        canvas.width = img.width; canvas.height = img.height;
-        initGrid(); saveHistory();
-        // 元ピクセルバッファ取得
-        ctx.drawImage(img,0,0);
-        imgData = ctx.getImageData(0,0,canvas.width,canvas.height);
-        draw(); errorDiv.textContent='';
-      };
-      img.onerror = ()=> showError('画像読み込み失敗');
-    });
-
-    function initGrid(){
-      gridContainer.innerHTML = '';
-      gridPoints = [];
-      if(gridX>30||gridY>30) showError('警告: 分割数が多いと重くなります');
-      for(let y=0;y<=gridY;y++){
-        for(let x=0;x<=gridX;x++){
-          const px = x*(canvas.width/gridX);
-          const py = y*(canvas.height/gridY);
-          gridPoints.push({ x:px, y:py, origX:px, origY:py });
-          createGridPoint(px,py,gridPoints.length-1);
+        // エラーメッセージ表示
+        function showError(message) {
+            errorDiv.textContent = message;
+            console.error(message);
         }
-      }
-    }
 
-    function createGridPoint(x,y,i){
-      const d=document.createElement('div');
-      d.className='grid-point';
-      d.style.left=`${x}px`; d.style.top=`${y}px`;
-      d.onmousedown=()=>{ isDragging=true; draggedPoint=i; };
-      gridContainer.appendChild(d);
-    }
-
-    function updateGridDOM(){
-      gridPoints.forEach((p,i)=>{
-        const d=gridContainer.children[i];
-        d.style.left=`${p.x}px`; d.style.top=`${p.y}px`;
-      });
-    }
-
-    function resetGrid(){ 
-      gridPoints.forEach(p=>{ p.x=p.origX; p.y=p.origY; });
-      updateGridDOM(); saveHistory(); draw();
-    }
-
-    function saveHistory(){
-      history=history.slice(0,historyIndex+1);
-      history.push(JSON.stringify(gridPoints));
-      historyIndex++;
-      if(history.length>50){ history.shift(); historyIndex--; }
-    }
-    function undo(){
-      if(historyIndex>0){
-        historyIndex--;
-        gridPoints = JSON.parse(history[historyIndex]);
-        updateGridDOM(); draw();
-      }
-    }
-    function redo(){
-      if(historyIndex<history.length-1){
-        historyIndex++;
-        gridPoints = JSON.parse(history[historyIndex]);
-        updateGridDOM(); draw();
-      }
-    }
-
-    gridXInput.oninput = ()=> {
-      gridX = +gridXInput.value; gridXValue.textContent=gridX;
-      initGrid(); saveHistory(); draw();
-    };
-    gridYInput.oninput = ()=> {
-      gridY = +gridYInput.value; gridYValue.textContent=gridY;
-      initGrid(); saveHistory(); draw();
-    };
-
-    document.onmousemove = e => {
-      if(isDragging && draggedPoint!==null){
-        const rect = canvas.getBoundingClientRect();
-        gridPoints[draggedPoint].x = e.clientX - rect.left;
-        gridPoints[draggedPoint].y = e.clientY - rect.top;
-        updateGridDOM();
-        draw();
-      }
-    };
-    document.onmouseup = ()=> {
-      if(isDragging){ saveHistory(); }
-      isDragging=false; draggedPoint=null;
-    };
-
-    // サンプリング（バイリニア）
-    function sampleBilinear(data, sx, sy){
-      const w=canvas.width, h=canvas.height;
-      // 境界クランプ
-      sx = Math.max(0,Math.min(w-1, sx));
-      sy = Math.max(0,Math.min(h-1, sy));
-      const x0 = Math.floor(sx), y0 = Math.floor(sy);
-      const x1 = Math.min(w-1, x0+1), y1 = Math.min(h-1, y0+1);
-      const dx = sx - x0, dy = sy - y0;
-      const idx = (y0*w + x0)*4;
-      const get = (xx,yy)=>{
-        const i=(yy*w+xx)*4;
-        return [data[i],data[i+1],data[i+2],data[i+3]];
-      };
-      const c00 = get(x0,y0), c10 = get(x1,y0), c01 = get(x0,y1), c11 = get(x1,y1);
-      const mix = (a,b,t)=>a + (b-a)*t;
-      const r = mix(mix(c00[0],c10[0],dx), mix(c01[0],c11[0],dx), dy);
-      const g = mix(mix(c00[1],c10[1],dx), mix(c01[1],c11[1],dx), dy);
-      const b = mix(mix(c00[2],c10[2],dx), mix(c01[2],c11[2],dx), dy);
-      const a = mix(mix(c00[3],c10[3],dx), mix(c01[3],c11[3],dx), dy);
-      return [r,g,b,a];
-    }
-
-    // 描画（逆写像＋オーバーサンプリング境界埋め）
-    function draw(){
-      if(!imgData) return;
-      const w=canvas.width, h=canvas.height;
-      const out = ctx.createImageData(w,h);
-      const od = out.data;
-      // 1) 逆写像で全ピクセル
-      for(let y=0;y<h;y++){
-        const gy = Math.floor(y*(gridY/h));
-        const v = (y - gy*(h/gridY)) / (h/gridY);
-        for(let x=0;x<w;x++){
-          const gx = Math.floor(x*(gridX/w));
-          const u = (x - gx*(w/gridX)) / (w/gridX);
-          const i0 = gy*(gridX+1)+gx;
-          const p1=gridPoints[i0], p2=gridPoints[i0+1],
-                p3=gridPoints[i0+gridX+1], p4=gridPoints[i0+gridX+2];
-          // 双線形で元画像座標
-          const sx = (1-u)*(1-v)*p1.origX + u*(1-v)*p2.origX + (1-u)*v*p3.origX + u*v*p4.origX;
-          const sy = (1-u)*(1-v)*p1.origY + u*(1-v)*p2.origY + (1-u)*v*p3.origY + u*v*p4.origY;
-          const [r,g,b,a] = sampleBilinear(imgData.data, sx, sy);
-          const idx = (y*w + x)*4;
-          od[idx]=r; od[idx+1]=g; od[idx+2]=b; od[idx+3]=a;
-        }
-      }
-      // 2) 簡易オーバーサンプリングで境界埋め
-      const tmp = new Uint8ClampedArray(od);
-      for(let y=1;y<h-1;y++){
-        for(let x=1;x<w-1;x++){
-          const idx=(y*w+x)*4;
-          if(od[idx+3] < 255*0.2){  // アルファ薄い→穴とみなす
-            // 周囲4方向の平均を埋め込み
-            const sum=[0,0,0,0], cnt=[0];
-            [[1,0],[-1,0],[0,1],[0,-1]].forEach(([dx,dy])=>{
-              const j = ((y+dy)*w + (x+dx))*4;
-              if(tmp[j+3]>255*0.8){
-                sum[0]+=tmp[j]; sum[1]+=tmp[j+1];
-                sum[2]+=tmp[j+2]; sum[3]+=tmp[j+3];
-                cnt[0]++;
-              }
-            });
-            if(cnt[0]>0){
-              od[idx]=sum[0]/cnt[0];
-              od[idx+1]=sum[1]/cnt[0];
-              od[idx+2]=sum[2]/cnt[0];
-              od[idx+3]=sum[3]/cnt[0];
+        // 画像読み込み
+        imageInput.addEventListener('change', (e) => {
+            const file = e.target.files[0];
+            if (!file) {
+                showError('画像ファイルが選択されていません。');
+                return;
             }
-          }
-        }
-      }
-      ctx.putImageData(out,0,0);
-    }
+            try {
+                img.src = URL.createObjectURL(file);
+                img.onload = () => {
+                    canvas.width = img.width;
+                    canvas.height = img.height;
+                    ctx.imageSmoothingEnabled = true;
+                    updateCanvasOffset();
+                    initGrid();
+                    saveHistory();
+                    draw();
+                    errorDiv.textContent = '';
+                };
+                img.onerror = () => {
+                    showError('画像の読み込みに失敗しました。');
+                };
+            } catch (err) {
+                showError('画像処理中にエラーが発生しました: ' + err.message);
+            }
+        });
 
-    function saveImage(){
-      const link=document.createElement('a');
-      link.download='warped.png';
-      link.href=canvas.toDataURL();
-      link.click();
-    }
+        // グリッド初期化
+        function initGrid() {
+            try {
+                if (gridX > 30 || gridY > 30) {
+                    showError('警告: 分割数が多いとパフォーマンスが低下する可能性があります。');
+                }
+                gridPoints = [];
+                gridContainer.innerHTML = '';
+                for (let y = 0; y <= gridY; y++) {
+                    for (let x = 0; x <= gridX; x++) {
+                        const px = (x / gridX) * canvas.width;
+                        const py = (y / gridY) * canvas.height;
+                        gridPoints.push({ x: px, y: py, origX: px, origY: py });
+                        createGridPoint(px, py, gridPoints.length - 1);
+                    }
+                }
+            } catch (err) {
+                showError('グリッド初期化中にエラーが発生しました: ' + err.message);
+            }
+        }
+
+        // グリッドポイントのDOM要素作成
+        function createGridPoint(x, y, index) {
+            const point = document.createElement('div');
+            point.className = 'grid-point';
+            updatePointPosition(point, x, y);
+            point.addEventListener('mousedown', () => {
+                isDragging = true;
+                draggedPoint = index;
+            });
+            gridContainer.appendChild(point);
+        }
+
+        // ポイントの位置更新
+        function updatePointPosition(point, x, y) {
+            point.style.left = `${canvasOffset.x + x}px`;
+            point.style.top = `${canvasOffset.y + y}px`;
+        }
+
+        // キャンバスのオフセット更新
+        function updateCanvasOffset() {
+            const rect = canvas.getBoundingClientRect();
+            canvasOffset.x = rect.left;
+            canvasOffset.y = rect.top;
+        }
+
+        // グリッドリセット
+        function resetGrid() {
+            try {
+                gridPoints.forEach((p, i) => {
+                    p.x = p.origX;
+                    p.y = p.origY;
+                    updatePointPosition(gridContainer.children[i], p.x, p.y);
+                });
+                saveHistory();
+                draw();
+            } catch (err) {
+                showError('グリッドリセット中にエラーが発生しました: ' + err.message);
+            }
+        }
+
+        // 履歴保存
+        function saveHistory() {
+            try {
+                history = history.slice(0, historyIndex + 1);
+                history.push(JSON.stringify(gridPoints.map(p => ({ x: p.x, y: p.y }))));
+                historyIndex++;
+                if (history.length > 50) {
+                    history.shift();
+                    historyIndex--;
+                }
+            } catch (err) {
+                showError('履歴保存中にエラーが発生しました: ' + err.message);
+            }
+        }
+
+        // 戻る
+        function undo() {
+            try {
+                if (historyIndex > 0) {
+                    historyIndex--;
+                    gridPoints = JSON.parse(history[historyIndex]).map((p, i) => ({
+                        x: p.x,
+                        y: p.y,
+                        origX: gridPoints[i].origX,
+                        origY: gridPoints[i].origY
+                    }));
+                    updateGridPoints();
+                    draw();
+                }
+            } catch (err) {
+                showError('戻る操作中にエラーが発生しました: ' + err.message);
+            }
+        }
+
+        // 進む
+        function redo() {
+            try {
+                if (historyIndex < history.length - 1) {
+                    historyIndex++;
+                    gridPoints = JSON.parse(history[historyIndex]).map((p, i) => ({
+                        x: p.x,
+                        y: p.y,
+                        origX: gridPoints[i].origX,
+                        origY: gridPoints[i].origY
+                    }));
+                    updateGridPoints();
+                    draw();
+                }
+            } catch (err) {
+                showError('進む操作中にエラーが発生しました: ' + err.message);
+            }
+        }
+
+        // グリッドポイント更新
+        function updateGridPoints() {
+            try {
+                gridPoints.forEach((p, i) => {
+                    updatePointPosition(gridContainer.children[i], p.x, p.y);
+                });
+            } catch (err) {
+                showError('グリッドポイント更新中にエラーが発生しました: ' + err.message);
+            }
+        }
+
+        // 画像保存
+        function saveImage() {
+            try {
+                const link = document.createElement('a');
+                link.download = 'warped_image.png';
+                link.href = canvas.toDataURL('image/png');
+                link.click();
+            } catch (err) {
+                showError('画像保存中にエラーが発生しました: ' + err.message);
+            }
+        }
+
+        // グリッドサイズ変更
+        gridXInput.addEventListener('input', () => {
+            try {
+                gridX = parseInt(gridXInput.value);
+                gridXValue.textContent = gridX;
+                initGrid();
+                saveHistory();
+                draw();
+            } catch (err) {
+                showError('横分割数変更中にエラーが発生しました: ' + err.message);
+            }
+        });
+        gridYInput.addEventListener('input', () => {
+            try {
+                gridY = parseInt(gridYInput.value);
+                gridYValue.textContent = gridY;
+                initGrid();
+                saveHistory();
+                draw();
+            } catch (err) {
+                showError('縦分割数変更中にエラーが発生しました: ' + err.message);
+            }
+        });
+
+        // マウスイベント
+        document.addEventListener('mousemove', (e) => {
+            if (isDragging && draggedPoint !== null) {
+                try {
+                    const point = gridPoints[draggedPoint];
+                    point.x = e.clientX - canvasOffset.x;
+                    point.y = e.clientY - canvasOffset.y;
+                    updatePointPosition(gridContainer.children[draggedPoint], point.x, point.y);
+                    draw();
+                } catch (err) {
+                    showError('ドラッグ中にエラーが発生しました: ' + err.message);
+                }
+            }
+        });
+        document.addEventListener('mouseup', () => {
+            if (isDragging) {
+                saveHistory();
+            }
+            isDragging = false;
+            draggedPoint = null;
+        });
+
+        // 描画
+        function draw() {
+            try {
+                ctx.clearRect(0, 0, canvas.width, canvas.height);
+                if (!img.src) return;
+
+                for (let y = 0; y < gridY; y++) {
+                    for (let x = 0; x < gridX; x++) {
+                        const i = y * (gridX + 1) + x;
+                        const p1 = gridPoints[i];
+                        const p2 = gridPoints[i + 1];
+                        const p3 = gridPoints[i + gridX + 1];
+                        const p4 = gridPoints[i + gridX + 2];
+
+                        const srcX = (x / gridX) * img.width;
+                        const srcY = (y / gridY) * img.height;
+                        const srcW = img.width / gridX;
+                        const srcH = img.height / gridY;
+
+                        warpSmooth(p1, p2, p3, p4, srcX, srcY, srcW, srcH);
+                    }
+                }
+            } catch (err) {
+                showError('描画中にエラーが発生しました: ' + err.message);
+            }
+        }
+
+        // 高品質な連続メッシュワープ
+        function warpSmooth(p1, p2, p3, p4, srcX, srcY, srcW, srcH) {
+            try {
+                // 歪み度に応じた適応型サンプリング
+                const distortion = Math.max(
+                    Math.abs(p2.x - p1.x - srcW),
+                    Math.abs(p3.y - p1.y - srcH),
+                    Math.abs(p4.x - p3.x - srcW),
+                    Math.abs(p4.y - p2.y - srcH)
+                );
+                const baseSteps = 80;
+                const steps = Math.min(150, baseSteps + Math.floor(distortion / 10));
+
+                const overlap = 1.1; // 強めのオーバーラップで隙間を埋める
+
+                // バイキュービック補間用の周辺ポイントを取得（簡略化のため4点のみ）
+                for (let u = 0; u <= 1; u += 1 / steps) {
+                    for (let v = 0; v <= 1; v += 1 / steps) {
+                        // バイリニア補間（ベース）
+                        let px = (1 - u) * (1 - v) * p1.x + u * (1 - v) * p2.x +
+                                 (1 - u) * v * p3.x + u * v * p4.x;
+                        let py = (1 - u) * (1 - v) * p1.y + u * (1 - v) * p2.y +
+                                 (1 - u) * v * p3.y + u * v * p4.y;
+
+                        // スムージング（簡略バイキュービック風）
+                        const smoothFactor = 0.1;
+                        px += smoothFactor * ((p2.x + p3.x) / 2 - px);
+                        py += smoothFactor * ((p2.y + p3.y) / 2 - py);
+
+                        const sx = srcX + u * srcW;
+                        const sy = srcY + v * srcH;
+
+                        // 描画（隙間防止）
+                        ctx.drawImage(
+                            img,
+                            sx, sy,
+                            srcW / steps * overlap,
+                            srcH / steps * overlap,
+                            px, py,
+                            canvas.width / gridX / steps * overlap,
+                            canvas.height / gridY / steps * overlap
+                        );
+                    }
+                }
+
+                // 境界ブレンド（隙間をさらに埋める）
+                ctx.globalAlpha = 0.5; // ブレンド用の透明度
+                for (let u = 0.95; u <= 1.05; u += 1 / steps) {
+                    for (let v = 0.95; v <= 1.05; v += 1 / steps) {
+                        const px = (1 - u) * (1 - v) * p1.x + u * (1 - v) * p2.x +
+                                   (1 - u) * v * p3.x + u * v * p4.x;
+                        const py = (1 - u) * (1 - v) * p1.y + u * (1 - v) * p2.y +
+                                   (1 - u) * v * p3.y + u * v * p4.y;
+
+                        const sx = srcX + u * srcW;
+                        const sy = srcY + v * srcH;
+
+                        ctx.drawImage(
+                            img,
+                            sx, sy,
+                            srcW / steps * overlap,
+                            srcH / steps * overlap,
+                            px, py,
+                            canvas.width / gridX / steps * overlap,
+                            canvas.height / gridY / steps * overlap
+                        );
+                    }
+                }
+                ctx.globalAlpha = 1.0; // 透明度リセット
+            } catch (err) {
+                showError('スムーズワープ中にエラーが発生しました: ' + err.message);
+            }
+        }
+
+        // 初期化
+        window.addEventListener('resize', updateCanvasOffset);
     </script>
 </body>
 </html>
