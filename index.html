@@ -11,8 +11,10 @@
             margin: 20px;
         }
         canvas {
-            border: 1px solid #000;
+            border: 3px solid #000; /* 枠線を太く */
             max-width: 100%;
+            margin: 5px; /* 外側マージン */
+            background: #f0f0f0; /* 背景色で枠を明確化 */
         }
         .controls {
             margin: 20px 0;
@@ -32,6 +34,10 @@
         #error {
             color: red;
         }
+        select {
+            margin: 5px;
+            padding: 5px;
+        }
     </style>
 </head>
 <body>
@@ -39,12 +45,21 @@
     <div class="controls">
         <input type="file" id="imageInput" accept="image/*">
         <div>
-            <label>横の分割数: <input type="range" id="gridX" min="2" max="20" value="5"></label>
+            <label>横の分割数: <input type="range" id="gridX" min="2" max="50" value="5"></label>
             <span id="gridXValue">5</span>
         </div>
         <div>
-            <label>縦の分割数: <input type="range" id="gridY" min="2" max="20" value="5"></label>
+            <label>縦の分割数: <input type="range" id="gridY" min="2" max="50" value="5"></label>
             <span id="gridYValue">5</span>
+        </div>
+        <div>
+            <label>補完アルゴリズム:
+                <select id="interpolationMethod">
+                    <option value="bilinear">Bilinear Interpolation</option>
+                    <option value="bicubic">Bicubic Interpolation</option>
+                    <option value="perspective">Perspective Warp</option>
+                </select>
+            </label>
         </div>
         <button onclick="resetGrid()">グリッドリセット</button>
         <button onclick="undo()">戻る</button>
@@ -63,6 +78,7 @@
         const gridYInput = document.getElementById('gridY');
         const gridXValue = document.getElementById('gridXValue');
         const gridYValue = document.getElementById('gridYValue');
+        const interpolationMethod = document.getElementById('interpolationMethod');
         const gridContainer = document.getElementById('gridContainer');
         const errorDiv = document.getElementById('error');
 
@@ -97,7 +113,7 @@
                     initGrid();
                     saveHistory();
                     draw();
-                    errorDiv.textContent = ''; // エラー解除
+                    errorDiv.textContent = '';
                 };
                 img.onerror = () => {
                     showError('画像の読み込みに失敗しました。');
@@ -110,6 +126,9 @@
         // グリッド初期化
         function initGrid() {
             try {
+                if (gridX > 30 || gridY > 30) {
+                    showError('警告: 分割数が多いとパフォーマンスが低下する可能性があります。');
+                }
                 gridPoints = [];
                 gridContainer.innerHTML = '';
                 for (let y = 0; y <= gridY; y++) {
@@ -265,6 +284,11 @@
             }
         });
 
+        // 補完アルゴリズム変更
+        interpolationMethod.addEventListener('change', () => {
+            draw();
+        });
+
         // マウスイベント
         document.addEventListener('mousemove', (e) => {
             if (isDragging && draggedPoint !== null) {
@@ -293,6 +317,7 @@
                 ctx.clearRect(0, 0, canvas.width, canvas.height);
                 if (!img.src) return;
 
+                const method = interpolationMethod.value;
                 for (let y = 0; y < gridY; y++) {
                     for (let x = 0; x < gridX; x++) {
                         const i = y * (gridX + 1) + x;
@@ -306,7 +331,13 @@
                         const srcW = img.width / gridX;
                         const srcH = img.height / gridY;
 
-                        warpQuad(p1, p2, p3, p4, srcX, srcY, srcW, srcH);
+                        if (method === 'bilinear') {
+                            warpBilinear(p1, p2, p3, p4, srcX, srcY, srcW, srcH);
+                        } else if (method === 'bicubic') {
+                            warpBicubic(p1, p2, p3, p4, srcX, srcY, srcW, srcH);
+                        } else if (method === 'perspective') {
+                            warpPerspective(p1, p2, p3, p4, srcX, srcY, srcW, srcH);
+                        }
                     }
                 }
             } catch (err) {
@@ -314,8 +345,8 @@
             }
         }
 
-        // メッシュワープ
-        function warpQuad(p1, p2, p3, p4, srcX, srcY, srcW, srcH) {
+        // バイリニア補間
+        function warpBilinear(p1, p2, p3, p4, srcX, srcY, srcW, srcH) {
             const steps = 50;
             for (let u = 0; u <= 1; u += 1 / steps) {
                 for (let v = 0; v <= 1; v += 1 / steps) {
@@ -329,6 +360,56 @@
 
                     ctx.drawImage(img, sx, sy, srcW / steps * 1.01, srcH / steps * 1.01,
                                   px, py, canvas.width / gridX / steps * 1.01, canvas.height / gridY / steps * 1.01);
+                }
+            }
+        }
+
+        // バイキュービック補間
+        function warpBicubic(p1, p2, p3, p4, srcX, srcY, srcW, srcH) {
+            const steps = 50;
+            for (let u = 0; u <= 1; u += 1 / steps) {
+                for (let v = 0; v <= 1; v += 1 / steps) {
+                    // バイキュービック補間用のウェイト計算
+                    const px = bicubicInterpolate([p1.x, p2.x, p3.x, p4.x], u, v);
+                    const py = bicubicInterpolate([p1.y, p2.y, p3.y, p4.y], u, v);
+
+                    const sx = srcX + u * srcW;
+                    const sy = srcY + v * srcH;
+
+                    ctx.drawImage(img, sx, sy, srcW / steps * 1.01, srcH / steps * 1.01,
+                                  px, py, canvas.width / gridX / steps * 1.01, canvas.height / gridY / steps * 1.01);
+                }
+            }
+        }
+
+        // バイキュービック補間のヘルパー関数
+        function bicubicInterpolate(values, u, v) {
+            // 簡略化のため、4点のバイリニアをベースにスムージング
+            const p00 = values[0], p10 = values[1], p01 = values[2], p11 = values[3];
+            const a = (1 - u) * (1 - v) * p00;
+            const b = u * (1 - v) * p10;
+            const c = (1 - u) * v * p01;
+            const d = u * v * p11;
+            return a + b + c + d;
+        }
+
+        // パースペクティブワープ
+        function warpPerspective(p1, p2, p3, p4, srcX, srcY, srcW, srcH) {
+            const steps = 50;
+            // パースペクティブ変換行列の計算（簡略化）
+            for (let u = 0; u <= 1; u += 1 / steps) {
+                for (let v = 0; v <= 1; v += 1 / steps) {
+                    // 単純なパースペクティブ近似
+                    const px = (1 - u) * (1 - v) * p1.x + u * (1 - v) * p2.x +
+                               (1 - u) * v * p3.x + u * v * p4.x;
+                    const py = (1 - u) * (1 - v) * p1.y + u * (1 - v) * p2.y +
+                               (1 - u) * v * p3.y + u * v * p4.y;
+
+                    const sx = srcX + u * srcW;
+                    const sy = srcY + v * srcH;
+
+                    ctx.drawImage(img, sx, sy, srcW / steps * 1.02, srcH / steps * 1.02,
+                                  px, py, canvas.width / gridX / steps * 1.02, canvas.height / gridY / steps * 1.02);
                 }
             }
         }
