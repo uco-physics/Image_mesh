@@ -3,29 +3,53 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>メッシュワープ（更新制御付き）</title>
+  <title>メッシュワープ（複数レイヤ対応版）</title>
   <style>
     body { font-family: Arial, sans-serif; text-align: center; margin: 20px; }
     #container { position: relative; display: inline-block; }
     canvas { border: 3px solid #000; background: #f0f0f0; }
-    #gridContainer { position: absolute; top:0; left:0; width:100%; height:100%; pointer-events:none; }
+    #gridContainer {
+      position: absolute;
+      top: 0; left: 0;
+      width: 100%; height: 100%;
+      pointer-events: none;
+    }
     .grid-point {
-      position: absolute; width: 10px; height: 10px;
-      background: rgba(255,0,0,0.8); border-radius:50%;
-      transform: translate(-50%,-50%); cursor: move; pointer-events:auto;
+      position: absolute;
+      width: 10px; height: 10px;
+      background: rgba(255,0,0,0.8);
+      border-radius: 50%;
+      transform: translate(-50%,-50%);
+      cursor: move;
+      pointer-events: auto;
     }
     .controls { margin: 20px 0; }
-    button, input[type=range] { margin: 5px; }
+    button, input[type=range], input[type=file], select { margin: 5px; }
     #error { color: red; }
+    .layer-control {
+      border: 1px solid #ccc;
+      padding: 10px;
+      margin: 10px auto;
+      max-width: 600px;
+    }
+    .layer-item { margin: 5px 0; }
   </style>
 </head>
 <body>
-  <h1>メッシュワープ（更新制御付き）</h1>
+  <h1>メッシュワープ（複数レイヤ対応）</h1>
   <div class="controls">
-    <input type="file" id="imageInput" accept="image/*">
-    <label>横分割: <input type="range" id="gridX" min="2" max="50" value="5"><span id="gridXValue">5</span></label>
-    <label>縦分割: <input type="range" id="gridY" min="2" max="50" value="5"><span id="gridYValue">5</span></label>
-    <button id="updateMeshBtn" style="display:none;">メッシュ更新</button>
+    <div class="layer-control">
+      <h3>レイヤ管理</h3>
+      <div id="layerList"></div>
+      <button onclick="addLayer()">新しいレイヤを追加</button>
+      <button onclick="moveLayerUp()">選択レイヤを上へ</button>
+      <button onclick="moveLayerDown()">選択レイヤを下へ</button>
+      <button onclick="deleteLayer()">選択レイヤを削除</button>
+    </div>
+    <div>
+      <label>横分割: <input type="range" id="gridX" min="2" max="50" value="5"><span id="gridXValue">5</span></label>
+      <label>縦分割: <input type="range" id="gridY" min="2" max="50" value="5"><span id="gridYValue">5</span></label>
+    </div>
     <button onclick="resetGrid()">リセット</button>
     <button onclick="undo()">戻る</button>
     <button onclick="redo()">進む</button>
@@ -40,237 +64,431 @@
 
   <script>
   const canvas = document.getElementById('canvas');
-  const ctx    = canvas.getContext('2d');
-  const imgInput = document.getElementById('imageInput');
+  const ctx = canvas.getContext('2d');
   const gridXInput = document.getElementById('gridX');
   const gridYInput = document.getElementById('gridY');
   const gridXValue = document.getElementById('gridXValue');
   const gridYValue = document.getElementById('gridYValue');
-  const updateMeshBtn = document.getElementById('updateMeshBtn');
   const gridContainer = document.getElementById('gridContainer');
+  const layerList = document.getElementById('layerList');
   const errorDiv = document.getElementById('error');
 
-  let img = new Image();
-  let imgData = null;
-  let gridPoints = [];
-  let gridX = 5, gridY = 5;
+  let layers = []; // { img, imgData, gridPoints, opacity, gridX, gridY }
+  let activeLayerIndex = -1;
   let isDragging = false, draggedIndex = null;
   let history = [], historyIdx = -1;
-  let dirtyMesh = false;
+  let canvasWidth = 0, canvasHeight = 0;
 
-  function showError(msg) { errorDiv.textContent = msg; console.error(msg); }
+  function showError(msg) {
+    errorDiv.textContent = msg;
+    console.error(msg);
+  }
 
-  imgInput.addEventListener('change', e => {
+  // レイヤ管理
+  function addLayer() {
+    const layer = {
+      img: new Image(),
+      imgData: null,
+      gridPoints: [],
+      opacity: 1.0,
+      gridX: parseInt(gridXInput.value),
+      gridY: parseInt(gridYInput.value),
+      fileInput: null
+    };
+    layers.push(layer);
+    activeLayerIndex = layers.length - 1;
+    updateLayerUI();
+    // ファイル選択を促す
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = 'image/*';
+    input.onchange = (e) => loadImageForLayer(e, activeLayerIndex);
+    layer.fileInput = input;
+    input.click();
+  }
+
+  function loadImageForLayer(e, layerIndex) {
     const file = e.target.files[0];
-    if (!file) return showError('画像を選択してください');
-    img.src = URL.createObjectURL(file);
-    img.onload = () => {
-      canvas.width = img.width;  canvas.height = img.height;
-      initGrid();  saveHistory();
-      ctx.drawImage(img,0,0);
-      imgData = ctx.getImageData(0,0,canvas.width,canvas.height);
+    if (!file) {
+      showError('画像を選択してください');
+      layers.splice(layerIndex, 1);
+      activeLayerIndex = layers.length - 1;
+      updateLayerUI();
+      return;
+    }
+    const layer = layers[layerIndex];
+    layer.img.src = URL.createObjectURL(file);
+    layer.img.onload = () => {
+      // 初回はキャンバスサイズを設定
+      if (!canvasWidth || !canvasHeight) {
+        canvasWidth = canvas.width = layer.img.width;
+        canvasHeight = canvas.height = layer.img.height;
+      }
+      // 画像をキャンバスサイズにリサイズ（簡易）
+      const tempCanvas = document.createElement('canvas');
+      tempCanvas.width = canvasWidth;
+      tempCanvas.height = canvasHeight;
+      const tempCtx = tempCanvas.getContext('2d');
+      tempCtx.drawImage(layer.img, 0, 0, canvasWidth, canvasHeight);
+      layer.imgData = tempCtx.getImageData(0, 0, canvasWidth, canvasHeight);
+      initGridForLayer(layer);
+      saveHistory();
+      updateLayerUI();
       draw();
       errorDiv.textContent = '';
     };
-    img.onerror = () => showError('画像読み込み失敗');
-  });
-
-  // グリッド初期化
-  function initGrid(){
-    gridContainer.innerHTML = '';
-    gridPoints = [];
-    if (gridX>30 || gridY>30) showError('分割数が多いと重くなります');
-    for(let y=0; y<=gridY; y++){
-      for(let x=0; x<=gridX; x++){
-        const px = x * (canvas.width/gridX);
-        const py = y * (canvas.height/gridY);
-        gridPoints.push({ x:px, y:py, origX:px, origY:py });
-        createPoint(px,py,gridPoints.length-1);
-      }
-    }
-    dirtyMesh = false;
-    updateMeshBtn.style.display = 'none';
-    gridXInput.disabled = false;
-    gridYInput.disabled = false;
+    layer.img.onerror = () => {
+      showError('画像読み込み失敗');
+      layers.splice(layerIndex, 1);
+      activeLayerIndex = layers.length - 1;
+      updateLayerUI();
+    };
   }
 
-  function createPoint(x,y,i){
+  function deleteLayer() {
+    if (activeLayerIndex >= 0 && layers.length > 0) {
+      layers.splice(activeLayerIndex, 1);
+      activeLayerIndex = Math.min(activeLayerIndex, layers.length - 1);
+      updateLayerUI();
+      saveHistory();
+      draw();
+    }
+  }
+
+  function moveLayerUp() {
+    if (activeLayerIndex > 0) {
+      [layers[activeLayerIndex], layers[activeLayerIndex - 1]] =
+        [layers[activeLayerIndex - 1], layers[activeLayerIndex]];
+      activeLayerIndex--;
+      updateLayerUI();
+      saveHistory();
+      draw();
+    }
+  }
+
+  function moveLayerDown() {
+    if (activeLayerIndex < layers.length - 1) {
+      [layers[activeLayerIndex], layers[activeLayerIndex + 1]] =
+        [layers[activeLayerIndex + 1], layers[activeLayerIndex]];
+      activeLayerIndex++;
+      updateLayerUI();
+      saveHistory();
+      draw();
+    }
+  }
+
+  function updateLayerUI() {
+    layerList.innerHTML = '';
+    layers.forEach((layer, i) => {
+      const div = document.createElement('div');
+      div.className = 'layer-item';
+      const selected = i === activeLayerIndex ? 'selected' : '';
+      div.innerHTML = `
+        <input type="radio" name="activeLayer" value="${i}" ${selected ? 'checked' : ''}>
+        レイヤ${i + 1} (透過率: 
+        <input type="range" min="0" max="100" value="${layer.opacity * 100}" class="opacity" data-index="${i}"> 
+        <span class="opacity-value">${Math.round(layer.opacity * 100)}%</span>)
+        <input type="file" accept="image/*" class="image-input" data-index="${i}">
+      `;
+      layerList.appendChild(div);
+    });
+    // イベントリスナーを設定
+    layerList.querySelectorAll('input[name="activeLayer"]').forEach(radio => {
+      radio.addEventListener('change', (e) => {
+        activeLayerIndex = parseInt(e.target.value);
+        updateGridDOM();
+        draw();
+      });
+    });
+    layerList.querySelectorAll('.opacity').forEach(slider => {
+      slider.addEventListener('input', (e) => {
+        const index = parseInt(e.target.dataset.index);
+        layers[index].opacity = parseInt(e.target.value) / 100;
+        e.target.nextElementSibling.textContent = `${e.target.value}%`;
+        draw();
+      });
+    });
+    layerList.querySelectorAll('.image-input').forEach(input => {
+      input.addEventListener('change', (e) => {
+        const index = parseInt(e.target.dataset.index);
+        loadImageForLayer(e, index);
+      });
+    });
+    updateGridDOM();
+  }
+
+  // グリッド初期化（レイヤごと）
+  function initGridForLayer(layer) {
+    layer.gridPoints = [];
+    if (layer.gridX > 30 || layer.gridY > 30) showError('分割数が多いと重くなります');
+    for (let y = 0; y <= layer.gridY; y++) {
+      for (let x = 0; x <= layer.gridX; x++) {
+        const px = x * (canvasWidth / layer.gridX);
+        const py = y * (canvasHeight / layer.gridY);
+        layer.gridPoints.push({ x: px, y: py, origX: px, origY: py });
+      }
+    }
+    if (activeLayerIndex === layers.indexOf(layer)) {
+      updateGridDOM();
+    }
+  }
+
+  function updateGridDOM() {
+    gridContainer.innerHTML = '';
+    if (activeLayerIndex >= 0 && layers[activeLayerIndex]) {
+      const layer = layers[activeLayerIndex];
+      layer.gridPoints.forEach((p, i) => {
+        createPoint(p.x, p.y, i);
+      });
+    }
+  }
+
+  function createPoint(x, y, i) {
     const d = document.createElement('div');
     d.className = 'grid-point';
-    d.style.left = x+'px';  d.style.top = y+'px';
+    d.style.left = x + 'px';
+    d.style.top = y + 'px';
     d.onmousedown = () => {
-      isDragging = true; draggedIndex = i;
+      isDragging = true;
+      draggedIndex = i;
     };
     gridContainer.appendChild(d);
   }
 
-  function updateDOM(){
-    gridPoints.forEach((p,i)=>{
-      const d = gridContainer.children[i];
-      d.style.left = p.x+'px';
-      d.style.top  = p.y+'px';
-    });
-  }
-
   // ヒストリ
-  function saveHistory(){
-    history = history.slice(0,historyIdx+1);
-    history.push(JSON.stringify(gridPoints));
+  function saveHistory() {
+    history = history.slice(0, historyIdx + 1);
+    history.push(JSON.stringify(layers.map(l => ({
+      gridPoints: l.gridPoints,
+      opacity: l.opacity,
+      gridX: l.gridX,
+      gridY: l.gridY
+    }))));
     historyIdx++;
-    if(history.length>50){ history.shift(); historyIdx--; }
-  }
-  function undo(){
-    if(historyIdx>0){
+    if (history.length > 50) {
+      history.shift();
       historyIdx--;
-      gridPoints = JSON.parse(history[historyIdx]);
-      updateDOM(); draw();
     }
   }
-  function redo(){
-    if(historyIdx<history.length-1){
+
+  function undo() {
+    if (historyIdx > 0) {
+      historyIdx--;
+      const state = JSON.parse(history[historyIdx]);
+      layers.forEach((l, i) => {
+        if (state[i]) {
+          l.gridPoints = state[i].gridPoints.map(p => ({ ...p }));
+          l.opacity = state[i].opacity;
+          l.gridX = state[i].gridX;
+          l.gridY = state[i].gridY;
+        }
+      });
+      updateLayerUI();
+      draw();
+    }
+  }
+
+  function redo() {
+    if (historyIdx < history.length - 1) {
       historyIdx++;
-      gridPoints = JSON.parse(history[historyIdx]);
-      updateDOM(); draw();
+      const state = JSON.parse(history[historyIdx]);
+      layers.forEach((l, i) => {
+        if (state[i]) {
+          l.gridPoints = state[i].gridPoints.map(p => ({ ...p }));
+          l.opacity = state[i].opacity;
+          l.gridX = state[i].gridX;
+          l.gridY = state[i].gridY;
+        }
+      });
+      updateLayerUI();
+      draw();
     }
   }
-  function resetGrid(){
-    gridPoints.forEach(p=>{ p.x=p.origX; p.y=p.origY; });
-    updateDOM(); saveHistory(); draw();
+
+  function resetGrid() {
+    if (activeLayerIndex >= 0) {
+      const layer = layers[activeLayerIndex];
+      layer.gridPoints.forEach(p => {
+        p.x = p.origX;
+        p.y = p.origY;
+      });
+      updateGridDOM();
+      saveHistory();
+      draw();
+    }
   }
 
-  // スライダー制御
   gridXInput.oninput = () => {
-    if(dirtyMesh) return;
-    gridX = +gridXInput.value;  gridXValue.textContent = gridX;
-    initGrid();  saveHistory();  draw();
+    if (activeLayerIndex >= 0) {
+      const layer = layers[activeLayerIndex];
+      layer.gridX = +gridXInput.value;
+      gridXValue.textContent = layer.gridX;
+      initGridForLayer(layer);
+      saveHistory();
+      draw();
+    }
   };
+
   gridYInput.oninput = () => {
-    if(dirtyMesh) return;
-    gridY = +gridYInput.value;  gridYValue.textContent = gridY;
-    initGrid();  saveHistory();  draw();
+    if (activeLayerIndex >= 0) {
+      const layer = layers[activeLayerIndex];
+      layer.gridY = +gridYInput.value;
+      gridYValue.textContent = layer.gridY;
+      initGridForLayer(layer);
+      saveHistory();
+      draw();
+    }
   };
 
-  // メッシュ更新ボタン
-  updateMeshBtn.addEventListener('click', () => {
-    // 現在の x,y を origX,origY に反映
-    gridPoints.forEach(p => {
-      p.origX = p.x;  p.origY = p.y;
-    });
-    // 新しいベースメッシュと見なしてヒストリリセット
-    history = [];  historyIdx = -1;
-    saveHistory();
-    dirtyMesh = false;
-    updateMeshBtn.style.display = 'none';
-    gridXInput.disabled = false;
-    gridYInput.disabled = false;
-  });
-
-  // ドラッグ処理
+  // ドラッグ
   document.addEventListener('mousemove', e => {
-    if(!isDragging) return;
+    if (!isDragging || activeLayerIndex < 0) return;
     const rect = canvas.getBoundingClientRect();
     const x = e.clientX - rect.left;
     const y = e.clientY - rect.top;
-    const p = gridPoints[draggedIndex];
-    p.x = Math.max(0, Math.min(canvas.width, x));
-    p.y = Math.max(0, Math.min(canvas.height, y));
-    updateDOM(); draw();
+    const p = layers[activeLayerIndex].gridPoints[draggedIndex];
+    p.x = Math.max(0, Math.min(canvasWidth, x));
+    p.y = Math.max(0, Math.min(canvasHeight, y));
+    updateGridDOM();
+    draw();
   });
+
   document.addEventListener('mouseup', () => {
-    if(isDragging){
+    if (isDragging) {
       saveHistory();
-      isDragging = false; draggedIndex = null;
-      // 変形が確定したら dirtyMesh
-      dirtyMesh = true;
-      updateMeshBtn.style.display = 'inline-block';
-      gridXInput.disabled = true;
-      gridYInput.disabled = true;
+      isDragging = false;
+      draggedIndex = null;
     }
   });
 
-  // バイリニアサンプリング
-  function sampleBilinear(buf, sx, sy){
-    const w=canvas.width, h=canvas.height;
-    sx = Math.max(0,Math.min(w-1,sx)); sy = Math.max(0,Math.min(h-1,sy));
-    const x0=Math.floor(sx), y0=Math.floor(sy), x1=Math.min(w-1,x0+1), y1=Math.min(h-1,y0+1);
-    const dx=sx-x0, dy=sy-y0;
-    const idx=(y0*w+x0)*4, i10=(y0*w+x1)*4, i01=(y1*w+x0)*4, i11=(y1*w+x1)*4;
-    const c00=[buf[idx],buf[idx+1],buf[idx+2],buf[idx+3]],
-          c10=[buf[i10],buf[i10+1],buf[i10+2],buf[i10+3]],
-          c01=[buf[i01],buf[i01+1],buf[i01+2],buf[i01+3]],
-          c11=[buf[i11],buf[i11+1],buf[i11+2],buf[i11+3]];
-    const mix=(a,b,t)=>a+(b-a)*t;
-    return [
-      mix(mix(c00[0],c10[0],dx), mix(c01[0],c11[0],dx), dy),
-      mix(mix(c00[1],c10[1],dx), mix(c01[1],c11[1],dx), dy),
-      mix(mix(c00[2],c10[2],dx), mix(c01[2],c11[2],dx), dy),
-      mix(mix(c00[3],c10[3],dx), mix(c01[3],c11[3],dx), dy)
-    ];
+  // バイリニアサンプル
+  function sampleBilinear(buf, sx, sy) {
+    const w = canvasWidth, h = canvasHeight;
+    sx = Math.max(0, Math.min(w - 1, sx));
+    sy = Math.max(0, Math.min(h - 1, sy));
+    const x0 = Math.floor(sx), y0 = Math.floor(sy);
+    const x1 = Math.min(w - 1, x0 + 1), y1 = Math.min(h - 1, y0 + 1);
+    const dx = sx - x0, dy = sy - y0;
+    const i00 = (y0 * w + x0) * 4, i10 = (y0 * w + x1) * 4,
+          i01 = (y1 * w + x0) * 4, i11 = (y1 * w + x1) * 4;
+    const c00 = [buf[i00], buf[i00 + 1], buf[i00 + 2], buf[i00 + 3]];
+    const c10 = [buf[i10], buf[i10 + 1], buf[i10 + 2], buf[i10 + 3]];
+    const c01 = [buf[i01], buf[i01 + 1], buf[i01 + 2], buf[i01 + 3]];
+    const c11 = [buf[i11], buf[i11 + 1], buf[i11 + 2], buf[i11 + 3]];
+    const mix = (a, b, t) => a + (b - a) * t;
+    const r = mix(mix(c00[0], c10[0], dx), mix(c01[0], c11[0], dx), dy);
+    const g = mix(mix(c00[1], c10[1], dx), mix(c01[1], c11[1], dx), dy);
+    const b = mix(mix(c00[2], c10[2], dx), mix(c01[2], c11[2], dx), dy);
+    const a = mix(mix(c00[3], c10[3], dx), mix(c01[3], c11[3], dx), dy);
+    return [r, g, b, a];
   }
 
-  // 三角形逆写像ヘルパー
-  function drawTriangle(v0,v1,v2,o0,o1,o2, buf, W,H){
-    const minX = Math.max(0, Math.floor(Math.min(v0.x,v1.x,v2.x)));
-    const maxX = Math.min(W-1, Math.ceil (Math.max(v0.x,v1.x,v2.x)));
-    const minY = Math.max(0, Math.floor(Math.min(v0.y,v1.y,v2.y)));
-    const maxY = Math.min(H-1, Math.ceil (Math.max(v0.y,v1.y,v2.y)));
-    const area = (v1.y-v2.y)*(v0.x-v2.x)+(v2.x-v1.x)*(v0.y-v2.y);
-    for(let y=minY;y<=maxY;y++){
-      for(let x=minX;x<=maxX;x++){
-        const w0 = ((v1.y-v2.y)*(x-v2.x)+(v2.x-v1.x)*(y-v2.y)) / area;
-        const w1 = ((v2.y-v0.y)*(x-v2.x)+(v0.x-v2.x)*(y-v2.y)) / area;
+  // 三角形逆写像
+  function drawTriangle(v0, v1, v2, o0, o1, o2, outBuf, outW, outH, layerOpacity) {
+    const minX = Math.max(0, Math.floor(Math.min(v0.x, v1.x, v2.x)));
+    const maxX = Math.min(outW - 1, Math.ceil(Math.max(v0.x, v1.x, v2.x)));
+    const minY = Math.max(0, Math.floor(Math.min(v0.y, v1.y, v2.y)));
+    const maxY = Math.min(outH - 1, Math.ceil(Math.max(v0.y, v1.y, v2.y)));
+    const area = (v1.y - v2.y) * (v0.x - v2.x) + (v2.x - v1.x) * (v0.y - v2.y);
+    if (Math.abs(area) < 1e-6) return; // 面積ゼロはスキップ
+    for (let y = minY; y <= maxY; y++) {
+      for (let x = minX; x <= maxX; x++) {
+        const w0 = ((v1.y - v2.y) * (x - v2.x) + (v2.x - v1.x) * (y - v2.y)) / area;
+        const w1 = ((v2.y - v0.y) * (x - v2.x) + (v0.x - v2.x) * (y - v2.y)) / area;
         const w2 = 1 - w0 - w1;
-        if(w0>=0&&w1>=0&&w2>=0){
-          const sx = w0*o0.x + w1*o1.x + w2*o2.x;
-          const sy = w0*o0.y + w1*o1.y + w2*o2.y;
-          const [r,g,b,a] = sampleBilinear(imgData.data,sx,sy);
-          const idx = (y*W + x)*4;
-          buf[idx]=r; buf[idx+1]=g; buf[idx+2]=b; buf[idx+3]=a;
+        if (w0 >= 0 && w1 >= 0 && w2 >= 0) {
+          const sx = w0 * o0.x + w1 * o1.x + w2 * o2.x;
+          const sy = w0 * o0.y + w1 * o1.y + w2 * o2.y;
+          const [r, g, b, a] = sampleBilinear(imgData.data, sx, sy);
+          const idx = (y * outW + x) * 4;
+          outBuf[idx] = r;
+          outBuf[idx + 1] = g;
+          outBuf[idx + 2] = b;
+          outBuf[idx + 3] = a * layerOpacity;
         }
       }
     }
   }
 
   // 描画本体
-  function draw(){
-    if(!imgData) return;
-    const W=canvas.width, H=canvas.height;
-    const output = ctx.createImageData(W,H);
+  function draw() {
+    if (layers.length === 0) return;
+    const w = canvasWidth, h = canvasHeight;
+    const output = ctx.createImageData(w, h);
     const buf = output.data;
-    for(let gy=0;gy<gridY;gy++){
-      for(let gx=0;gx<gridX;gx++){
-        const i = gy*(gridX+1)+gx;
-        const p1=gridPoints[i],   p2=gridPoints[i+1],
-              p3=gridPoints[i+gridX+1], p4=gridPoints[i+gridX+2];
-        const o1={x:p1.origX,y:p1.origY}, o2={x:p2.origX,y:p2.origY},
-              o3={x:p3.origX,y:p3.origY}, o4={x:p4.origX,y:p4.origY};
-        drawTriangle(p1,p2,p3, o1,o2,o3, buf, W,H);
-        drawTriangle(p4,p3,p2, o4,o3,o2, buf, W,H);
-      }
+
+    // 背景をクリア（透明）
+    for (let i = 0; i < buf.length; i += 4) {
+      buf[i] = 0;
+      buf[i + 1] = 0;
+      buf[i + 2] = 0;
+      buf[i + 3] = 0;
     }
+
+    // 各レイヤを描画（奥から手前）
+    layers.forEach(layer => {
+      if (!layer.imgData) return;
+      imgData = layer.imgData; // グローバルimgDataを一時的に設定
+      for (let gy = 0; gy < layer.gridY; gy++) {
+        for (let gx = 0; gx < layer.gridX; gx++) {
+          const i = gy * (layer.gridX + 1) + gx;
+          const p1 = layer.gridPoints[i],
+                p2 = layer.gridPoints[i + 1],
+                p3 = layer.gridPoints[i + layer.gridX + 1],
+                p4 = layer.gridPoints[i + layer.gridX + 2];
+          const o1 = { x: p1.origX, y: p1.origY },
+                o2 = { x: p2.origX, y: p2.origY },
+                o3 = { x: p3.origX, y: p3.origY },
+                o4 = { x: p4.origX, y: p4.origY };
+
+          // 上半分三角形
+          drawTriangle(p1, p2, p3, o1, o2, o3, buf, w, h, layer.opacity);
+          // 下半分三角形
+          drawTriangle(p4, p3, p2, o4, o3, o2, buf, w, h, layer.opacity);
+        }
+      }
+    });
+
     // 簡易境界埋め
     const tmp = new Uint8ClampedArray(buf);
-    for(let y=1;y<H-1;y++){
-      for(let x=1;x<W-1;x++){
-        const idx=(y*W+x)*4;
-        if(buf[idx+3]<10){
-          let sr=0,sg=0,sb=0,sa=0,c=0;
-          [[1,0],[-1,0],[0,1],[0,-1]].forEach(([dx,dy])=>{
-            const j=((y+dy)*W+x+dx)*4;
-            if(tmp[j+3]>200){ sr+=tmp[j]; sg+=tmp[j+1]; sb+=tmp[j+2]; sa+=tmp[j+3]; c++; }
+    for (let y = 1; y < h - 1; y++) {
+      for (let x = 1; x < w - 1; x++) {
+        const idx = (y * w + x) * 4;
+        if (buf[idx + 3] < 10) {
+          let sr = 0, sg = 0, sb = 0, sa = 0, cnt = 0;
+          [[1, 0], [-1, 0], [0, 1], [0, -1]].forEach(([dx, dy]) => {
+            const j = ((y + dy) * w + (x + dx)) * 4;
+            if (tmp[j + 3] > 200) {
+              sr += tmp[j];
+              sg += tmp[j + 1];
+              sb += tmp[j + 2];
+              sa += tmp[j + 3];
+              cnt++;
+            }
           });
-          if(c){ buf[idx]=sr/c; buf[idx+1]=sg/c; buf[idx+2]=sb/c; buf[idx+3]=sa/c; }
+          if (cnt) {
+            buf[idx] = sr / cnt;
+            buf[idx + 1] = sg / cnt;
+            buf[idx + 2] = sb / cnt;
+            buf[idx + 3] = sa / cnt;
+          }
         }
       }
     }
-    ctx.putImageData(output,0,0);
+
+    ctx.putImageData(output, 0, 0);
   }
 
-  function saveImage(){
+  // 保存
+  function saveImage() {
     const a = document.createElement('a');
-    a.href = canvas.toDataURL(); a.download = 'warped.png';
+    a.href = canvas.toDataURL('image/png');
+    a.download = 'warped.png';
     a.click();
   }
+
+  // 初期化
+  addLayer();
   </script>
 </body>
 </html>
