@@ -3,79 +3,110 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>メッシュワープ（コミットツリー版）最高峰</title>
-  <style>
-    body { font-family: Arial, sans-serif; text-align: center; margin: 20px; }
-    #container { position: relative; display: inline-block; }
-    canvas { border: 3px solid #000; background: #f0f0f0; }
-    #gridContainer {
-      position: absolute; top: 0; left: 0;
-      width: 100%; height: 100%;
-      pointer-events: none;
-    }
-    .grid-point {
-      position: absolute; width: 10px; height: 10px;
-      background: rgba(255,0,0,0.8); border-radius:50%;
-      transform: translate(-50%,-50%); cursor: move;
-      pointer-events: auto;
-    }
-    .controls { margin: 20px 0; }
-    button, input[type=range] { margin: 5px; }
-    #error { color: red; }
-  </style>
-</head>
-<body>
-  <h1>メッシュワープ（コミットツリー版）</h1>
-  <div class="controls">
-    <input type="file" id="imageInput" accept="image/*">
-    <label>横分割:
-      <input type="range" id="gridX" min="2" max="50" value="5">
-      <span id="gridXValue">5</span>
-    </label>
-    <label>縦分割:
-      <input type="range" id="gridY" min="2" max="50" value="5">
-      <span id="gridYValue">5</span>
-    </label>
-    <button id="applyGridBtn">グリッド更新</button>
-    <button id="undoBtn">戻る</button>
-    <button id="redoBtn">進む</button>
-    <button id="resetBtn">リセット</button>
-    <button id="saveBtn">保存</button>
-    <div id="error"></div>
-  </div>
-  <div id="container">
-    <canvas id="canvas"></canvas>
-    <div id="gridContainer"></div>
-  </div>
+  <title>Mesh Warp – コミットツリー版</title>
 
+  <!-- Tailwind CSS CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            primary: '#4F46E5',
+            secondary: '#10B981'
+          }
+        }
+      }
+    }
+  </script>
+
+  <!-- Google Fonts: Inter -->
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
+  <!-- Font Awesome (Kit ID を your-kit-id に置き換え) -->
+  <script src="https://kit.fontawesome.com/your-kit-id.js" crossorigin="anonymous"></script>
+
+  <!-- カスタムスタイル -->
+  <link rel="stylesheet" href="style.css">
+</head>
+
+<body class="bg-gray-50 font-inter text-gray-800">
+  <header class="bg-white/80 backdrop-blur sticky top-0 z-10 p-4 shadow-sm">
+    <h1 class="text-2xl font-bold text-primary text-center">メッシュワープ（コミットツリー版）</h1>
+  </header>
+
+  <main class="py-6 px-4 space-y-6 max-w-4xl mx-auto">
+    <!-- コントロールパネル -->
+    <section class="controls bg-white p-6 rounded-2xl shadow-lg grid gap-4 lg:grid-cols-2">
+      <div class="flex flex-col">
+        <label for="imageInput" class="font-semibold mb-1">画像ロード</label>
+        <input type="file" id="imageInput" accept="image/*" class="block">
+      </div>
+
+      <label class="flex flex-col">
+        <span class="font-semibold">横分割</span>
+        <input type="range" id="gridX" min="2" max="50" value="5" class="h-2 bg-gray-200 rounded-lg">
+        <span id="gridXValue" class="mt-1 text-right text-sm text-gray-600">5</span>
+      </label>
+
+      <label class="flex flex-col">
+        <span class="font-semibold">縦分割</span>
+        <input type="range" id="gridY" min="2" max="50" value="5" class="h-2 bg-gray-200 rounded-lg">
+        <span id="gridYValue" class="mt-1 text-right text-sm text-gray-600">5</span>
+      </label>
+
+      <div class="col-span-full flex flex-wrap gap-2 justify-center">
+        <button id="applyGridBtn" class="btn-primary">
+          <i class="fas fa-grip-lines"></i> グリッド更新
+        </button>
+        <button id="undoBtn" class="btn-outline">
+          <i class="fas fa-undo"></i> 戻る
+        </button>
+        <button id="redoBtn" class="btn-outline">
+          <i class="fas fa-redo"></i> 進む
+        </button>
+        <button id="resetBtn" class="btn-outline">
+          <i class="fas fa-sync-alt"></i> リセット
+        </button>
+        <button id="saveBtn" class="btn-primary">
+          <i class="fas fa-download"></i> 保存
+        </button>
+      </div>
+
+      <div id="error" class="col-span-full text-red-600 h-5"></div>
+    </section>
+
+    <!-- キャンバス＋グリッドポイント -->
+    <section class="relative inline-block">
+      <canvas id="canvas" class="border-4 border-gray-800 bg-white"></canvas>
+      <div id="gridContainer" class="absolute inset-0"></div>
+    </section>
+  </main>
+
+  <!-- オリジナルの JavaScript をここにペースト -->
   <script>
     // --- コミットクラス ---
     class Commit {
       constructor(parent, imgData, gridX, gridY, initialPoints) {
         this.parent    = parent;
         this.children  = [];
-        this.imgData   = imgData;       // ImageData at this commit
+        this.imgData   = imgData;
         this.gridX     = gridX;
         this.gridY     = gridY;
-        this.snapshots = [];            // history of gridPoints for this commit
+        this.snapshots = [];
         this.idx       = -1;
-        // 初期スナップショットを push
         this.push(initialPoints);
       }
       push(points) {
-        // undo してから新操作なら先を捨てる
         this.snapshots = this.snapshots.slice(0, this.idx + 1);
-        // 深コピーして保存
         this.snapshots.push(points.map(p => ({ x:p.x, y:p.y, origX:p.origX, origY:p.origY })));
         this.idx++;
       }
       currentPoints() {
-        // 深コピーで返す
         return this.snapshots[this.idx].map(p => ({ ...p }));
       }
     }
 
-    // --- グローバル変数 ---
+    // --- グローバル ---
     const canvas = document.getElementById('canvas');
     const ctx    = canvas.getContext('2d');
     const imgInput     = document.getElementById('imageInput');
@@ -91,17 +122,10 @@
     const gridContainer= document.getElementById('gridContainer');
     const errorDiv     = document.getElementById('error');
 
-    let img      = new Image();
-    let imgData  = null;    // 現在のベース画像データ
-    let gridPoints = [];     // 今操作中のポイント配列
-    let pendingX = 5, pendingY = 5;  // スライダーの未適用値
-
-    let rootCommit    = null;
-    let currentCommit = null;
-
+    let img, imgData, gridPoints = [], pendingX = 5, pendingY = 5;
+    let rootCommit = null, currentCommit = null;
     let isDragging = false, dragIdx = null;
 
-    // --- ヘルパー ---
     function showError(msg) {
       errorDiv.textContent = msg;
       console.error(msg);
@@ -148,87 +172,71 @@
       }
     }
 
-    // --- グリッド描画 ---
     function draw() {
       if (!imgData) return;
-      const w = canvas.width, h = canvas.height;
+      const w=canvas.width, h=canvas.height;
       const output = ctx.createImageData(w,h);
       const buf = output.data;
-      // 各セルを 2 三角形で描く
-      for (let gy=0; gy<currentCommit.gridY; gy++) {
-        for (let gx=0; gx<currentCommit.gridX; gx++) {
+      for(let gy=0; gy<currentCommit.gridY; gy++){
+        for(let gx=0; gx<currentCommit.gridX; gx++){
           const i = gy*(currentCommit.gridX+1) + gx;
-          const p1 = gridPoints[i],     p2 = gridPoints[i+1],
-                p3 = gridPoints[i+currentCommit.gridX+1],
-                p4 = gridPoints[i+currentCommit.gridX+2];
-          const o1={x:p1.origX,y:p1.origY},
-                o2={x:p2.origX,y:p2.origY},
-                o3={x:p3.origX,y:p3.origY},
-                o4={x:p4.origX,y:p4.origY};
-          drawTriangle(p1,p2,p3, o1,o2,o3, buf,w,h);
-          drawTriangle(p4,p3,p2, o4,o3,o2, buf,w,h);
+          const p1=gridPoints[i], p2=gridPoints[i+1],
+                p3=gridPoints[i+currentCommit.gridX+1],
+                p4=gridPoints[i+currentCommit.gridX+2];
+          const o1={x:p1.origX,y:p1.origY},o2={x:p2.origX,y:p2.origY},
+                o3={x:p3.origX,y:p3.origY},o4={x:p4.origX,y:p4.origY};
+          drawTriangle(p1,p2,p3,o1,o2,o3,buf,w,h);
+          drawTriangle(p4,p3,p2,o4,o3,o2,buf,w,h);
         }
       }
       ctx.putImageData(output,0,0);
     }
 
-    // --- UI: ポイント管理 ---
     function createPoint(x,y,i){
       const d = document.createElement('div');
       d.className = 'grid-point';
       d.style.left = x+'px';
       d.style.top  = y+'px';
-      d.onmousedown = ()=> {
-        isDragging = true;
-        dragIdx = i;
-      };
+      d.onmousedown = ()=>{ isDragging=true; dragIdx=i; };
       gridContainer.appendChild(d);
     }
-    function initGridCommit(commit) {
-      // 1) キャンバスにベース画像を描画
-      ctx.putImageData(commit.imgData, 0, 0);
-      imgData = commit.imgData;
-      // 2) グリッドサイズ反映
-      gridXInput.value = commit.gridX;
-      gridYInput.value = commit.gridY;
-      gridXValueEl.textContent = commit.gridX;
-      gridYValueEl.textContent = commit.gridY;
-      pendingX = commit.gridX;
-      pendingY = commit.gridY;
-      // 3) gridPoints をスナップショットから読み込み
-      gridPoints = commit.currentPoints();
-      // 4) DOM 再構築
+    function initGridCommit(c){
+      ctx.putImageData(c.imgData,0,0);
+      imgData = c.imgData;
+      gridXInput.value = c.gridX;
+      gridYInput.value = c.gridY;
+      gridXValueEl.textContent = c.gridX;
+      gridYValueEl.textContent = c.gridY;
+      pendingX = c.gridX;
+      pendingY = c.gridY;
+      gridPoints = c.currentPoints();
       gridContainer.innerHTML = '';
-      for (let i=0; i<gridPoints.length; i++){
-        createPoint(gridPoints[i].x, gridPoints[i].y, i);
-      }
+      gridPoints.forEach((p,i)=> createPoint(p.x,p.y,i));
     }
 
-    // --- イベントハンドラ ---
-    imgInput.addEventListener('change', e => {
-      const file = e.target.files[0];
-      if (!file) return showError('画像を選択してください');
+    imgInput.addEventListener('change',e=>{
+      const file=e.target.files[0];
+      if(!file) return showError('画像を選択してください');
+      img = new Image();
       img.src = URL.createObjectURL(file);
-      img.onload = () => {
+      img.onload = ()=>{
         canvas.width = img.width;
         canvas.height= img.height;
-        // 最初のベース画像キャッシュ
         ctx.drawImage(img,0,0);
         const base = ctx.getImageData(0,0,canvas.width,canvas.height);
-        // ルートコミット生成
-        const initPoints = [];
-        const gx = +gridXInput.value, gy = +gridYInput.value;
+        const initPoints=[];
+        const gx=+gridXInput.value, gy=+gridYInput.value;
         for(let y=0;y<=gy;y++){
           for(let x=0;x<=gx;x++){
             initPoints.push({
               x: x*(canvas.width/gx),
               y: y*(canvas.height/gy),
-              origX: x*(canvas.width/gx),
-              origY: y*(canvas.height/gy)
+              origX:x*(canvas.width/gx),
+              origY:y*(canvas.height/gy)
             });
           }
         }
-        rootCommit = new Commit(null, base, gx, gy, initPoints);
+        rootCommit = new Commit(null,base,gx,gy,initPoints);
         currentCommit = rootCommit;
         initGridCommit(rootCommit);
         draw();
@@ -237,104 +245,82 @@
       img.onerror = ()=> showError('画像読み込み失敗');
     });
 
-    applyGridBtn.addEventListener('click', () => {
-      // 現在の deform 画像を新ベースに
+    applyGridBtn.addEventListener('click',()=>{
       const newBase = ctx.getImageData(0,0,canvas.width,canvas.height);
-      // pending→commit サイズ
-      const nx = pendingX, ny = pendingY;
-      // 新グリッド初期点
-      const pts = [];
+      const nx=pendingX, ny=pendingY;
+      const pts=[];
       for(let y=0;y<=ny;y++){
         for(let x=0;x<=nx;x++){
           pts.push({
             x: x*(canvas.width/nx),
             y: y*(canvas.height/ny),
-            origX: x*(canvas.width/nx),
-            origY: y*(canvas.height/ny)
+            origX:x*(canvas.width/nx),
+            origY:y*(canvas.height/ny)
           });
         }
       }
-      // 新コミット
-      const c = new Commit(currentCommit, newBase, nx, ny, pts);
+      const c=new Commit(currentCommit,newBase,nx,ny,pts);
       currentCommit.children.push(c);
-      currentCommit = c;
+      currentCommit=c;
       initGridCommit(c);
       draw();
     });
 
-    undoBtn.addEventListener('click', () => {
-      if (!currentCommit) return;
-      // コミット内 undo
-      if (currentCommit.idx > 0) {
-        currentCommit.idx--;
-      }
-      // コミット先頭なら親へ戻る
-      else if (currentCommit.parent) {
-        currentCommit = currentCommit.parent;
-      }
+    undoBtn.addEventListener('click',()=>{
+      if(!currentCommit) return;
+      if(currentCommit.idx>0) currentCommit.idx--;
+      else if(currentCommit.parent) currentCommit=currentCommit.parent;
       initGridCommit(currentCommit);
       draw();
     });
 
-    redoBtn.addEventListener('click', () => {
-      if (!currentCommit) return;
-      // コミット内 redo
-      if (currentCommit.idx < currentCommit.snapshots.length - 1) {
-        currentCommit.idx++;
-      }
-      // 末尾かつ子コミットが一つなら進む
-      else if (currentCommit.children.length === 1) {
-        currentCommit = currentCommit.children[0];
-      }
+    redoBtn.addEventListener('click',()=>{
+      if(!currentCommit) return;
+      if(currentCommit.idx<currentCommit.snapshots.length-1) currentCommit.idx++;
+      else if(currentCommit.children.length===1) currentCommit=currentCommit.children[0];
       initGridCommit(currentCommit);
       draw();
     });
 
-    resetBtn.addEventListener('click', () => {
-      // 現コミット初期状態に戻す
-      currentCommit.idx = 0;
+    resetBtn.addEventListener('click',()=>{
+      currentCommit.idx=0;
       initGridCommit(currentCommit);
       draw();
     });
 
-    saveBtn.addEventListener('click', () => {
-      const a = document.createElement('a');
-      a.href = canvas.toDataURL();
-      a.download = 'warped.png';
+    saveBtn.addEventListener('click',()=>{
+      const a=document.createElement('a');
+      a.href=canvas.toDataURL();
+      a.download='warped.png';
       a.click();
     });
 
-    document.addEventListener('mousemove', e => {
-      if (!isDragging) return;
-      const rect = canvas.getBoundingClientRect();
-      const x = e.clientX - rect.left;
-      const y = e.clientY - rect.top;
-      const p = gridPoints[dragIdx];
-      p.x = Math.max(0, Math.min(canvas.width, x));
-      p.y = Math.max(0, Math.min(canvas.height, y));
-      // DOM とスナップショット更新
-      const d = gridContainer.children[dragIdx];
-      d.style.left = p.x + 'px';
-      d.style.top  = p.y + 'px';
+    document.addEventListener('mousemove',e=>{
+      if(!isDragging) return;
+      const rect=canvas.getBoundingClientRect();
+      const x=e.clientX-rect.left, y=e.clientY-rect.top;
+      const p=gridPoints[dragIdx];
+      p.x=Math.max(0,Math.min(canvas.width,x));
+      p.y=Math.max(0,Math.min(canvas.height,y));
+      const d=gridContainer.children[dragIdx];
+      d.style.left=p.x+'px';
+      d.style.top =p.y+'px';
       currentCommit.push(gridPoints);
       draw();
     });
 
-    document.addEventListener('mouseup', () => {
-      if (isDragging) {
-        isDragging = false;
-        dragIdx = null;
-      }
+    document.addEventListener('mouseup',()=>{
+      isDragging=false;
+      dragIdx=null;
     });
 
-    // スライダー更新（pending に反映）
-    gridXInput.addEventListener('input', () => {
-      pendingX = +gridXInput.value;
-      gridXValueEl.textContent = pendingX;
+    gridXInput.addEventListener('input',()=>{
+      pendingX=+gridXInput.value;
+      gridXValueEl.textContent=pendingX;
     });
-    gridYInput.addEventListener('input', () => {
-      pendingY = +gridYInput.value;
-      gridYValueEl.textContent = pendingY;
+    gridYInput.addEventListener('input',()=>{
+      pendingY=+gridYInput.value;
+      gridYValueEl.textContent=pendingY;
     });
   </script>
 </body>
