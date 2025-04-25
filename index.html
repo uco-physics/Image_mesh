@@ -29,6 +29,9 @@
         button {
             margin: 5px;
         }
+        #error {
+            color: red;
+        }
     </style>
 </head>
 <body>
@@ -48,6 +51,7 @@
         <button onclick="redo()">進む</button>
         <button onclick="saveImage()">画像保存</button>
     </div>
+    <div id="error"></div>
     <canvas id="canvas"></canvas>
     <div id="gridContainer"></div>
 
@@ -60,6 +64,7 @@
         const gridXValue = document.getElementById('gridXValue');
         const gridYValue = document.getElementById('gridYValue');
         const gridContainer = document.getElementById('gridContainer');
+        const errorDiv = document.getElementById('error');
 
         let img = new Image();
         let gridPoints = [];
@@ -70,10 +75,20 @@
         let history = [];
         let historyIndex = -1;
 
+        // エラーメッセージ表示
+        function showError(message) {
+            errorDiv.textContent = message;
+            console.error(message);
+        }
+
         // 画像読み込み
         imageInput.addEventListener('change', (e) => {
             const file = e.target.files[0];
-            if (file) {
+            if (!file) {
+                showError('画像ファイルが選択されていません。');
+                return;
+            }
+            try {
                 img.src = URL.createObjectURL(file);
                 img.onload = () => {
                     canvas.width = img.width;
@@ -82,21 +97,31 @@
                     initGrid();
                     saveHistory();
                     draw();
+                    errorDiv.textContent = ''; // エラー解除
                 };
+                img.onerror = () => {
+                    showError('画像の読み込みに失敗しました。');
+                };
+            } catch (err) {
+                showError('画像処理中にエラーが発生しました: ' + err.message);
             }
         });
 
         // グリッド初期化
         function initGrid() {
-            gridPoints = [];
-            gridContainer.innerHTML = '';
-            for (let y = 0 ipsa; y <= gridY; y++) {
-                for (let x = 0; x <= gridX; x++) {
-                    const px = (x / gridX) * canvas.width;
-                    const py = (y / gridY) * canvas.height;
-                    gridPoints.push({ x: px, y: py, origX: px, origY: py });
-                    createGridPoint(px, py, gridPoints.length - 1);
+            try {
+                gridPoints = [];
+                gridContainer.innerHTML = '';
+                for (let y = 0; y <= gridY; y++) {
+                    for (let x = 0; x <= gridX; x++) {
+                        const px = (x / gridX) * canvas.width;
+                        const py = (y / gridY) * canvas.height;
+                        gridPoints.push({ x: px, y: py, origX: px, origY: py });
+                        createGridPoint(px, py, gridPoints.length - 1);
+                    }
                 }
+            } catch (err) {
+                showError('グリッド初期化中にエラーが発生しました: ' + err.message);
             }
         }
 
@@ -127,95 +152,131 @@
 
         // グリッドリセット
         function resetGrid() {
-            gridPoints.forEach((p, i) => {
-                p.x = p.origX;
-                p.y = p.origY;
-                updatePointPosition(gridContainer.children[i], p.x, p.y);
-            });
-            saveHistory();
-            draw();
+            try {
+                gridPoints.forEach((p, i) => {
+                    p.x = p.origX;
+                    p.y = p.origY;
+                    updatePointPosition(gridContainer.children[i], p.x, p.y);
+                });
+                saveHistory();
+                draw();
+            } catch (err) {
+                showError('グリッドリセット中にエラーが発生しました: ' + err.message);
+            }
         }
 
         // 履歴保存
         function saveHistory() {
-            history = history.slice(0, historyIndex + 1);
-            history.push(JSON.stringify(gridPoints.map(p => ({ x: p.x, y: p.y }))));
-            historyIndex++;
-            if (history.length > 50) { // 履歴上限
-                history.shift();
-                historyIndex--;
+            try {
+                history = history.slice(0, historyIndex + 1);
+                history.push(JSON.stringify(gridPoints.map(p => ({ x: p.x, y: p.y }))));
+                historyIndex++;
+                if (history.length > 50) {
+                    history.shift();
+                    historyIndex--;
+                }
+            } catch (err) {
+                showError('履歴保存中にエラーが発生しました: ' + err.message);
             }
         }
 
         // 戻る
         function undo() {
-            if (historyIndex > 0) {
-                historyIndex--;
-                gridPoints = JSON.parse(history[historyIndex]).map((p, i) => ({
-                    x: p.x,
-                    y: p.y,
-                    origX: gridPoints[i].origX,
-                    origY: gridPoints[i].origY
-                }));
-                updateGridPoints();
-                draw();
+            try {
+                if (historyIndex > 0) {
+                    historyIndex--;
+                    gridPoints = JSON.parse(history[historyIndex]).map((p, i) => ({
+                        x: p.x,
+                        y: p.y,
+                        origX: gridPoints[i].origX,
+                        origY: gridPoints[i].origY
+                    }));
+                    updateGridPoints();
+                    draw();
+                }
+            } catch (err) {
+                showError('戻る操作中にエラーが発生しました: ' + err.message);
             }
         }
 
         // 進む
         function redo() {
-            if (historyIndex < history.length - 1) {
-                historyIndex++;
-                gridPoints = JSON.parse(history[historyIndex]).map((p, i) => ({
-                    x: p.x,
-                    y: p.y,
-                    origX: gridPoints[i].origX,
-                    origY: gridPoints[i].origY
-                }));
-                updateGridPoints();
-                draw();
+            try {
+                if (historyIndex < history.length - 1) {
+                    historyIndex++;
+                    gridPoints = JSON.parse(history[historyIndex]).map((p, i) => ({
+                        x: p.x,
+                        y: p.y,
+                        origX: gridPoints[i].origX,
+                        origY: gridPoints[i].origY
+                    }));
+                    updateGridPoints();
+                    draw();
+                }
+            } catch (err) {
+                showError('進む操作中にエラーが発生しました: ' + err.message);
             }
         }
 
         // グリッドポイント更新
         function updateGridPoints() {
-            gridPoints.forEach((p, i) => {
-                updatePointPosition(gridContainer.children[i], p.x, p.y);
-            });
+            try {
+                gridPoints.forEach((p, i) => {
+                    updatePointPosition(gridContainer.children[i], p.x, p.y);
+                });
+            } catch (err) {
+                showError('グリッドポイント更新中にエラーが発生しました: ' + err.message);
+            }
         }
 
         // 画像保存
         function saveImage() {
-            const link = document.createElement('a');
-            link.download = 'warped_image.png';
-            link.href = canvas.toDataURL('image/png');
-            link.click();
+            try {
+                const link = document.createElement('a');
+                link.download = 'warped_image.png';
+                link.href = canvas.toDataURL('image/png');
+                link.click();
+            } catch (err) {
+                showError('画像保存中にエラーが発生しました: ' + err.message);
+            }
         }
 
         // グリッドサイズ変更
         gridXInput.addEventListener('input', () => {
-            gridX = parseInt(gridXInput.value);
-            gridXValue.textContent = gridX;
-            initGrid();
-            saveHistory();
-            draw();
+            try {
+                gridX = parseInt(gridXInput.value);
+                gridXValue.textContent = gridX;
+                initGrid();
+                saveHistory();
+                draw();
+            } catch (err) {
+                showError('横分割数変更中にエラーが発生しました: ' + err.message);
+            }
         });
         gridYInput.addEventListener('input', () => {
-            gridY = parseInt(gridYInput.value);
-            gridYValue.textContent = gridY;
-            initGrid();
-            saveHistory();
-            draw();
+            try {
+                gridY = parseInt(gridYInput.value);
+                gridYValue.textContent = gridY;
+                initGrid();
+                saveHistory();
+                draw();
+            } catch (err) {
+                showError('縦分割数変更中にエラーが発生しました: ' + err.message);
+            }
         });
 
         // マウスイベント
         document.addEventListener('mousemove', (e) => {
             if (isDragging && draggedPoint !== null) {
-                const point = gridPoints[draggedPoint];
-                point.x = e.clientX - canvasOffset.x;
-                point.y = e.clientY - canvasOffset.y;
-                updatePointPosition(gridContainer.children[draggedPoint], point.x, point.y);
-                draw();
+                try {
+                    const point = gridPoints[draggedPoint];
+                    point.x = e.clientX - canvasOffset.x;
+                    point.y = e.clientY - canvasOffset.y;
+                    updatePointPosition(gridContainer.children[draggedPoint], point.x, point.y);
+                    draw();
+                } catch (err) {
+                    showError('ドラッグ中にエラーが発生しました: ' + err.message);
+                }
             }
         });
         document.addEventListener('mouseup', () => {
@@ -228,35 +289,36 @@
 
         // 描画
         function draw() {
-            ctx.clearRect(0, 0, canvas.width, canvas.height);
-            if (!img.src) return;
+            try {
+                ctx.clearRect(0, 0, canvas.width, canvas.height);
+                if (!img.src) return;
 
-            for (let y = 0; y < gridY; y++) {
-                for (let x = 0; x < gridX; x++) {
-                    const i = y * (gridX + 1) + x;
-                    const p1 = gridPoints[i];
-                    const p2 = gridPoints[i + 1];
-                    const p3 = gridPoints[i + gridX + 1];
-                    const p4 = gridPoints[i + gridX + 2];
+                for (let y = 0; y < gridY; y++) {
+                    for (let x = 0; x < gridX; x++) {
+                        const i = y * (gridX + 1) + x;
+                        const p1 = gridPoints[i];
+                        const p2 = gridPoints[i + 1];
+                        const p3 = gridPoints[i + gridX + 1];
+                        const p4 = gridPoints[i + gridX + 2];
 
-                    // 元画像の矩形
-                    const srcX = (x / gridX) * img.width;
-                    const srcY = (y / gridY) * img.height;
-                    const srcW = img.width / gridX;
-                    const srcH = img.height / gridY;
+                        const srcX = (x / gridX) * img.width;
+                        const srcY = (y / gridY) * img.height;
+                        const srcW = img.width / gridX;
+                        const srcH = img.height / gridY;
 
-                    // メッシュワープ
-                    warpQuad(p1, p2, p3, p4, srcX, srcY, srcW, srcH);
+                        warpQuad(p1, p2, p3, p4, srcX, srcY, srcW, srcH);
+                    }
                 }
+            } catch (err) {
+                showError('描画中にエラーが発生しました: ' + err.message);
             }
         }
 
-        // メッシュワープの実装（白い縞の修正）
+        // メッシュワープ
         function warpQuad(p1, p2, p3, p4, srcX, srcY, srcW, srcH) {
-            const steps = 50; // ステップ数を増やして隙間を減らす
+            const steps = 50;
             for (let u = 0; u <= 1; u += 1 / steps) {
                 for (let v = 0; v <= 1; v += 1 / steps) {
-                    // バイリニア補間
                     const px = (1 - u) * (1 - v) * p1.x + u * (1 - v) * p2.x +
                                (1 - u) * v * p3.x + u * v * p4.x;
                     const py = (1 - u) * (1 - v) * p1.y + u * (1 - v) * p2.y +
@@ -265,7 +327,6 @@
                     const sx = srcX + u * srcW;
                     const sy = srcY + v * srcH;
 
-                    // わずかにオーバーラップさせる
                     ctx.drawImage(img, sx, sy, srcW / steps * 1.01, srcH / steps * 1.01,
                                   px, py, canvas.width / gridX / steps * 1.01, canvas.height / gridY / steps * 1.01);
                 }
